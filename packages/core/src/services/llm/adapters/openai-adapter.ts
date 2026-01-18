@@ -113,8 +113,9 @@ export class OpenAIAdapter extends AbstractTextProviderAdapter {
    * @returns 动态获取的模型列表
    */
   public async getModelsAsync(config: TextModelConfig): Promise<TextModel[]> {
-    // 验证baseURL以/v1结尾
-    const baseURL = config.connectionConfig.baseURL || this.getProvider().defaultBaseURL
+    const baseURL = this.normalizeBaseURL(
+      config.connectionConfig.baseURL || this.getProvider().defaultBaseURL
+    )
 
     const openai = this.createOpenAIInstance(config, false)
 
@@ -327,6 +328,28 @@ export class OpenAIAdapter extends AbstractTextProviderAdapter {
     return {}
   }
 
+  // ===== URL 处理辅助方法 =====
+
+  /**
+   * 规范化 baseURL
+   * - 去除末尾 /chat/completions
+   * - 确保以 /v1 结尾
+   */
+  private normalizeBaseURL(baseURL: string): string {
+    let normalized = baseURL.trim()
+
+    if (normalized.endsWith('/chat/completions')) {
+      normalized = normalized.slice(0, -'/chat/completions'.length)
+    }
+
+    if (!normalized.endsWith('/v1')) {
+      normalized = normalized.replace(/\/+$/, '')
+      normalized = `${normalized}/v1`
+    }
+
+    return normalized
+  }
+
   // ===== 错误检测辅助方法 =====
 
   /**
@@ -384,11 +407,9 @@ export class OpenAIAdapter extends AbstractTextProviderAdapter {
   private createOpenAIInstance(config: TextModelConfig, isStream: boolean = false): OpenAI {
     const apiKey = config.connectionConfig.apiKey || ''
 
-    // 处理baseURL，如果以'/chat/completions'结尾则去掉
-    let processedBaseURL = config.connectionConfig.baseURL || this.getProvider().defaultBaseURL
-    if (processedBaseURL?.endsWith('/chat/completions')) {
-      processedBaseURL = processedBaseURL.slice(0, -'/chat/completions'.length)
-    }
+    const processedBaseURL = this.normalizeBaseURL(
+      config.connectionConfig.baseURL || this.getProvider().defaultBaseURL
+    )
 
     // 创建OpenAI实例配置
     const defaultTimeout = isStream ? 90000 : 60000
