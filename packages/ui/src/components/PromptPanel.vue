@@ -124,7 +124,8 @@
                         {{ t("prompt.applyToConversation") }}
                     </NButton>
                     <!-- 评估入口：分数徽章或评估按钮 -->
-                    <div v-if="showEvaluation && optimizedPrompt" class="evaluation-entry">
+                    <!-- prompt-only 评估（分析功能）不需要 optimizedPrompt -->
+                    <div v-if="showEvaluation && (optimizedPrompt || evaluationType === 'prompt-only')" class="evaluation-entry">
                         <EvaluationScoreBadge
                             v-if="hasEvaluationResult || isEvaluating"
                             :score="evaluationScore"
@@ -212,6 +213,7 @@
 
         <!-- 内容区域：使用 OutputDisplay 组件 -->
         <OutputDisplay
+            :test-id="testId ? testId + '-output' : undefined"
             ref="outputDisplayRef"
             :content="optimizedPrompt"
             :original-content="previousVersionText"
@@ -315,6 +317,11 @@ interface IteratePayload {
 }
 
 const props = defineProps({
+    /** E2E/测试定位用的 testId（用于 OutputDisplay 根节点 data-testid） */
+    testId: {
+        type: String,
+        default: undefined,
+    },
     optimizedPrompt: {
         type: String,
         default: "",
@@ -586,7 +593,8 @@ const templateSelectText = computed(() => {
 
 // 计算上一版本的文本用于显示
 const previousVersionText = computed(() => {
-    if (!props.versions || props.versions.length === 0) {
+    // ✅ 增强：确保 versions 是数组（避免路由渲染时 props 未传递导致的类型错误）
+    if (!Array.isArray(props.versions) || props.versions.length === 0) {
         return props.originalPrompt || "";
     }
 

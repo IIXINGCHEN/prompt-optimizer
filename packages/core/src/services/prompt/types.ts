@@ -61,11 +61,16 @@ export interface ConversationMessage {
 export type OptimizationMode = "system" | "user";
 
 /**
+ * 功能模式枚举（Basic / Pro / Image）
+ */
+export type FunctionMode = "basic" | "pro" | "image";
+
+/**
  * 子模式类型定义（三种功能模式独立）
  * 用于持久化各功能模式下的子模式选择
  */
 export type BasicSubMode = "system" | "user"; // 基础模式
-export type ProSubMode = "system" | "user"; // 上下文模式
+export type ProSubMode = "multi" | "variable"; // Pro 模式（多消息/变量）
 export type ImageSubMode = "text2image" | "image2image"; // 图像模式
 
 /**

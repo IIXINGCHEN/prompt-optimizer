@@ -9,6 +9,7 @@ import {
   type TextProvider,
   getBuiltinModelIds
 } from '@prompt-optimizer/core'
+import { getI18nErrorMessage } from '../../utils/error'
 import { useModelAdvancedParameters } from './useModelAdvancedParameters'
 import { computeConnectionConfig } from './useConnectionConfig'
 import type { AppServices } from '../../types/services'
@@ -24,7 +25,6 @@ interface TextModelForm {
   name: string
   enabled: boolean
   providerId: string
-  providerMeta?: TextProvider
   modelId: string
   connectionConfig: TextConnectionConfig
   paramOverrides: Record<string, unknown>
@@ -39,21 +39,28 @@ interface SetProviderOptions {
   resetConnectionConfig?: boolean
 }
 
+const generateTextModelId = (providerId: string, nonce?: number) => {
+  const normalizedProvider = (providerId || 'custom').toLowerCase().replace(/[^a-z0-9_-]/g, '_')
+  const rand = Math.random().toString(36).slice(2, 10)
+  // Include a nonce so retries remain unique even if Date.now/Math.random are mocked/stubbed.
+  const noncePart = typeof nonce === 'number' ? `_${nonce}` : ''
+  return `text_${normalizedProvider}_${Date.now()}_${rand}${noncePart}`
+}
+
 export function useTextModelManager() {
   const { t } = useI18n()
   const toast = useToast()
 
-  const services = inject<Ref<AppServices>>('services')
-  if (!services) {
+  const services = inject<Ref<AppServices | null>>('services', ref(null))
+  if (!services.value) {
     throw new Error('Services not provided!')
   }
 
   const modelManager = services.value.modelManager
   const llmService = services.value.llmService
   const textAdapterRegistry = services.value.textAdapterRegistry
-  
-  if (!modelManager || !llmService || !textAdapterRegistry) {
-    throw new Error('Required services not available!')
+  if (!textAdapterRegistry) {
+    throw new Error('textAdapterRegistry not provided!')
   }
 
   const models = ref<TextModelConfig[]>([])
@@ -268,7 +275,7 @@ export function useTextModelManager() {
       console.error('连接测试失败:', error)
       const model = await modelManager.getModel(id)
       const modelName = model?.name || id
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      const errorMessage = getI18nErrorMessage(error, 'Unknown error')
       toast.error(t('modelManager.testFailed', {
         provider: modelName,
         error: errorMessage
@@ -285,10 +292,10 @@ export function useTextModelManager() {
       await modelManager.enableModel(id)
       await loadModels()
       toast.success(t('modelManager.enableSuccess'))
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('启用模型失败:', error)
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      toast.error(t('modelManager.enableFailed', { error: errorMessage }))
+      const message = getI18nErrorMessage(error, 'Unknown error')
+      toast.error(t('modelManager.enableFailed', { error: message }))
     }
   }
 
@@ -299,10 +306,10 @@ export function useTextModelManager() {
       await modelManager.disableModel(id)
       await loadModels()
       toast.success(t('modelManager.disableSuccess'))
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('禁用模型失败:', error)
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      toast.error(t('modelManager.disableFailed', { error: errorMessage }))
+      const message = getI18nErrorMessage(error, 'Unknown error')
+      toast.error(t('modelManager.disableFailed', { error: message }))
     }
   }
 
@@ -311,10 +318,10 @@ export function useTextModelManager() {
       await modelManager.deleteModel(id)
       await loadModels()
       toast.success(t('modelManager.deleteSuccess'))
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('删除模型失败:', error)
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      toast.error(t('modelManager.deleteFailed', { error: errorMessage }))
+      const message = getI18nErrorMessage(error, 'Unknown error')
+      toast.error(t('modelManager.deleteFailed', { error: message }))
     }
   }
 
@@ -351,7 +358,6 @@ export function useTextModelManager() {
 
     // 使用共享函数处理连接配置
     const providerMeta = providers.value.find(p => p.id === providerId)
-    form.value.providerMeta = providerMeta
     form.value.connectionConfig = computeConnectionConfig(
       form.value.connectionConfig,
       providerMeta,
@@ -456,8 +462,10 @@ export function useTextModelManager() {
 
     isLoadingModelOptions.value = true
 
+    // Keep this outside try/catch so we can fall back to static models on error.
+    const providerTemplateId = form.value.providerId || currentProviderType.value || 'custom'
+
     try {
-      const providerTemplateId = form.value.providerId || currentProviderType.value || 'custom'
       const connectionConfig: TextConnectionConfig = {
         baseURL,
         ...form.value.connectionConfig,
@@ -506,11 +514,28 @@ export function useTextModelManager() {
       if (fetchedModels.length > 0 && !fetchedModels.some((m: { value: string }) => m.value === form.value.modelId)) {
         form.value.modelId = fetchedModels[0].value
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('获取模型列表失败:', error)
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      toast.error(errorMessage || t('modelManager.loadFailed'))
-      modelOptions.value = []
+
+      // Keep UX consistent: if dynamic fetch fails, fall back to static models
+      // but surface the failure to avoid a misleading "success" toast.
+      const errorMessage = getI18nErrorMessage(error, t('modelManager.loadFailed'))
+
+      let staticCount = 0
+      try {
+        const staticModels = textAdapterRegistry.getStaticModels(providerTemplateId)
+        staticCount = staticModels.length
+      } catch {
+        staticCount = 0
+      }
+
+      loadStaticModelsForProvider(providerTemplateId)
+
+      if (staticCount > 0) {
+        toast.warning(t('modelManager.fetchModelsFallback', { error: errorMessage, count: staticCount }))
+      } else {
+        toast.error(t('modelManager.fetchModelsFailed', { error: errorMessage }))
+      }
     } finally {
       isLoadingModelOptions.value = false
     }
@@ -577,16 +602,29 @@ export function useTextModelManager() {
   }
 
   const createNewModel = async () => {
-    if (!form.value.id) {
-      toast.error(t('modelManager.modelKeyRequired'))
-      throw new Error('模型标识必填')
+    // Auto-generate a stable internal id for the config.
+    // Text models use the id as the storage key and runtime selector.
+    const providerId = form.value.providerId || 'custom'
+    // Extremely unlikely, but avoid collisions with built-in keys or existing custom configs.
+    let modelKey = ''
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const candidate = generateTextModelId(providerId, attempt)
+      const existingModel = await modelManager.getModel(candidate)
+      if (!existingModel && !isDefaultModel(candidate)) {
+        modelKey = candidate
+        break
+      }
+    }
+
+    if (!modelKey) {
+      throw new Error(t('modelManager.modelIdGenerateFailed'))
     }
 
     const providerMeta = ensureProviderMeta(form.value.providerId)
     const modelMeta = ensureModelMeta(form.value.providerId, form.value.defaultModel || form.value.modelId)
 
     const newConfig = {
-      id: form.value.id,
+      id: modelKey,
       name: form.value.name,
       enabled: true,
       providerMeta,
@@ -595,8 +633,8 @@ export function useTextModelManager() {
       paramOverrides: { ...(form.value.paramOverrides ?? {}) }
     } as TextModelConfig
 
-    await modelManager.addModel(form.value.id, newConfig)
-    return form.value.id
+    await modelManager.addModel(modelKey, newConfig)
+    return modelKey
   }
 
   const saveForm = async () => {

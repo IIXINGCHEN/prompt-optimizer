@@ -7,6 +7,8 @@ import type {
   ImageModelConfig,
   ImageParameterDefinition
 } from '../types'
+import { ImageError } from '../errors'
+import { IMAGE_ERROR_CODES } from '../../../constants/error-codes'
 
 /**
  * 阿里百炼图像适配器
@@ -34,6 +36,7 @@ export class DashScopeImageAdapter extends AbstractImageProviderAdapter {
       id: 'dashscope',
       name: '阿里百炼',
       description: '阿里云百炼图像生成服务，支持通义千问图像模型（文生图/图生图）',
+      corsRestricted: true,
       requiresApiKey: true,
       defaultBaseURL: 'https://dashscope.aliyuncs.com',
       supportsDynamicModels: false,
@@ -178,7 +181,7 @@ export class DashScopeImageAdapter extends AbstractImageProviderAdapter {
       }
     }
 
-    throw new Error(`Test type ${testType} not supported by this model`)
+    throw new ImageError(IMAGE_ERROR_CODES.UNSUPPORTED_TEST_TYPE, undefined, { testType })
   }
 
   protected getParameterDefinitions(modelId: string): readonly ImageParameterDefinition[] {
@@ -269,20 +272,20 @@ export class DashScopeImageAdapter extends AbstractImageProviderAdapter {
       } catch {
         // 忽略 JSON 解析错误
       }
-      throw new Error(errorMessage)
+      throw new ImageError(IMAGE_ERROR_CODES.GENERATION_FAILED, errorMessage)
     }
 
     const data = await response.json()
 
     // 检查是否有错误
     if (data.code) {
-      throw new Error(data.message || `DashScope API error: ${data.code}`)
+      throw new ImageError(IMAGE_ERROR_CODES.GENERATION_FAILED, data.message || `DashScope API error: ${data.code}`)
     }
 
     // 解析 Qwen-Image 响应
     const choices = data.output?.choices || []
     if (choices.length === 0) {
-      throw new Error('No image data received from DashScope API')
+      throw new ImageError(IMAGE_ERROR_CODES.INVALID_RESPONSE_FORMAT)
     }
 
     // 只取第一张图像
@@ -290,7 +293,7 @@ export class DashScopeImageAdapter extends AbstractImageProviderAdapter {
     const content = choice.message?.content || []
     const imageContent = content.find((c: any) => c.image)
     if (!imageContent) {
-      throw new Error('No image URL in response')
+      throw new ImageError(IMAGE_ERROR_CODES.INVALID_RESPONSE_FORMAT)
     }
 
     return {
@@ -324,7 +327,12 @@ export class DashScopeImageAdapter extends AbstractImageProviderAdapter {
 
     // 添加输入图像
     if (request.inputImage) {
-      content.push({ image: request.inputImage.url || request.inputImage.b64 })
+      // DashScope 的 image 字段要求：公网 URL 或 data:{mime};base64,{data}。
+      // 本项目只支持本地 base64，因此这里统一拼成 data URL。
+      const mimeType = request.inputImage.mimeType || 'image/png'
+      const b64 = request.inputImage.b64 || ''
+      const dataUrl = b64.startsWith('data:') ? b64 : `data:${mimeType};base64,${b64}`
+      content.push({ image: dataUrl })
     }
 
     // 添加文本提示词
@@ -367,20 +375,20 @@ export class DashScopeImageAdapter extends AbstractImageProviderAdapter {
       } catch {
         // 忽略 JSON 解析错误
       }
-      throw new Error(errorMessage)
+      throw new ImageError(IMAGE_ERROR_CODES.GENERATION_FAILED, errorMessage)
     }
 
     const data = await response.json()
 
     // 检查是否有错误
     if (data.code) {
-      throw new Error(data.message || `DashScope API error: ${data.code}`)
+      throw new ImageError(IMAGE_ERROR_CODES.GENERATION_FAILED, data.message || `DashScope API error: ${data.code}`)
     }
 
     // 解析响应 - 只取第一张图像
     const choices = data.output?.choices || []
     if (choices.length === 0) {
-      throw new Error('No image data received from DashScope API')
+      throw new ImageError(IMAGE_ERROR_CODES.INVALID_RESPONSE_FORMAT)
     }
 
     // 查找第一张图像
@@ -404,6 +412,6 @@ export class DashScopeImageAdapter extends AbstractImageProviderAdapter {
       }
     }
 
-    throw new Error('No image URL in response')
+    throw new ImageError(IMAGE_ERROR_CODES.INVALID_RESPONSE_FORMAT)
   }
 }

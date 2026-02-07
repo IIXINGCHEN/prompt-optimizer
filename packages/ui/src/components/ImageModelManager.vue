@@ -39,15 +39,20 @@
                 <NTag size="small" type="primary" :bordered="false">
                   {{ config.model?.name || config.modelId }}
                 </NTag>
+                <NTag
+                  v-if="config.provider?.corsRestricted && !isElectronEnv"
+                  size="small"
+                  type="error"
+                  :bordered="false"
+                >
+                  {{ t('modelManager.corsRestrictedTag') }}
+                </NTag>
                 <!-- 能力标签移到这里 -->
                 <NTag v-if="config.model?.capabilities?.text2image" size="small" type="success" :bordered="false">
                   {{ t('image.capability.text2image') }}
                 </NTag>
                 <NTag v-if="config.model?.capabilities?.image2image" size="small" type="info" :bordered="false">
                   {{ t('image.capability.image2image') }}
-                </NTag>
-                <NTag v-if="config.model?.capabilities?.highResolution" size="small" type="primary" :bordered="false">
-                  {{ t('image.capability.highResolution') }}
                 </NTag>
               </NSpace>
             </NSpace>
@@ -75,7 +80,7 @@
             <!-- 测试结果缩略图 -->
             <NImage
               v-if="testResults[config.id]?.success && testResults[config.id]?.image"
-              :src="testResults[config.id].image.url || (testResults[config.id].image.b64?.startsWith('data:') ? testResults[config.id].image.b64 : `data:image/png;base64,${testResults[config.id].image.b64}`)"
+              :src="getPreviewImageSrc(config.id) || ''"
               width="24"
               height="24"
               object-fit="cover"
@@ -139,18 +144,21 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, inject } from 'vue'
+import { ref, onMounted, inject, h } from 'vue'
 
 import { useI18n } from 'vue-i18n'
 import {
-  NSpace, NCard, NText, NTag, NButton, NEmpty, NImage
+  NSpace, NCard, NText, NTag, NButton, NEmpty, NImage, useDialog
 } from 'naive-ui'
 import { useImageModelManager } from '../composables/model/useImageModelManager'
 import { useToast } from '../composables/ui/useToast'
-import type { IImageService } from '@prompt-optimizer/core'
+import { getI18nErrorMessage } from '../utils/error'
+import { isRunningInElectron, type IImageService, type ImageModel } from '@prompt-optimizer/core'
 
 const { t } = useI18n()
 const toast = useToast()
+const dialog = useDialog()
+const isElectronEnv = isRunningInElectron()
 
 // 定义事件
 const emit = defineEmits(['add', 'edit'])
@@ -165,7 +173,10 @@ const {
 } = useImageModelManager()
 
 // 注入依赖
-const imageService = inject<IImageService>('imageService') as unknown as IImageService
+const imageService = inject<IImageService>('imageService')
+if (!imageService) {
+  throw new Error('[ImageModelManager] Missing required dependency: imageService')
+}
 
 // 状态管理
 const testingConnections = ref<Record<string, boolean>>({})
@@ -182,8 +193,8 @@ const testResults = ref<Record<string, {
 const isTestingConnectionFor = (configId: string) => !!testingConnections.value[configId]
 
 // 辅助函数：根据模型能力选择测试类型
-const selectTestType = (model: { capabilities?: string[] }): 'text2image' | 'image2image' => {
-  const { text2image, image2image } = model.capabilities || {}
+const selectTestType = (model: ImageModel): 'text2image' | 'image2image' => {
+  const { text2image, image2image } = model.capabilities
 
   if (text2image && !image2image) {
     return 'text2image'  // 只支持文生图
@@ -200,6 +211,16 @@ const selectTestType = (model: { capabilities?: string[] }): 'text2image' | 'ima
   throw new Error('模型不支持任何图像生成功能')
 }
 
+const getPreviewImageSrc = (configId: string): string | null => {
+  const img = testResults.value[configId]?.image
+  if (!img) return null
+  if (img.url) return img.url
+  const b64 = img.b64
+  if (!b64) return null
+  if (b64.startsWith('data:')) return b64
+  return `data:image/png;base64,${b64}`
+}
+
 // 操作方法
 const openAddModal = () => {
   emit('add')
@@ -212,58 +233,85 @@ const editConfig = (configId: string) => {
 const testConnection = async (configId: string) => {
   if (isTestingConnectionFor(configId)) return
 
-  try {
-    testingConnections.value[configId] = true
+  const config = configs.value.find(c => c.id === configId)
+  if (!config) return
 
-    // 清除之前的测试结果
-    delete testResults.value[configId]
+  const runTest = async () => {
+    try {
+      testingConnections.value[configId] = true
 
-    const config = configs.value.find(c => c.id === configId)
-    if (!config) throw new Error('Config not found')
+      // 清除之前的测试结果
+      delete testResults.value[configId]
 
-    // 获取选中的模型信息
-    if (!config.model) {
-      throw new Error('选中的模型未找到')
+      if (!config) throw new Error('Config not found')
+
+      // 获取选中的模型信息
+      if (!config.model) {
+        throw new Error('选中的模型未找到')
+      }
+
+      // 根据模型能力确定测试类型
+      const testType = selectTestType(config.model)
+
+      // 通过统一服务执行测试（Electron 下经 IPC 走主进程；Web 下本地执行）
+      const result = await imageService.testConnection(config)
+
+      // 测试成功
+      testResults.value[configId] = {
+        success: true,
+        image: result.images[0],
+        testType
+      }
+
+      toast.success(t('image.connection.testSuccess'))
+
+    } catch (error) {
+      console.error('Connection test failed:', error)
+
+      // 记录失败结果
+      testResults.value[configId] = {
+        success: false,
+        testType: 'text2image' // 默认值
+      }
+
+      const detail = getI18nErrorMessage(error, t('image.connection.testError'))
+      if (detail === t('image.connection.testError')) {
+        toast.error(detail)
+      } else {
+        toast.error(`${t('image.connection.testError')}: ${detail}`)
+      }
+    } finally {
+      delete testingConnections.value[configId]
     }
-
-    // 根据模型能力确定测试类型
-    const testType = selectTestType(config.model)
-
-    // 通过统一服务执行测试（Electron 下经 IPC 走主进程；Web 下本地执行）
-    const result = await imageService.testConnection(config as unknown)
-
-    // 测试成功
-    testResults.value[configId] = {
-      success: true,
-      image: result.images[0],
-      testType
-    }
-
-    toast.success(t('image.connection.testSuccess'))
-
-  } catch (error) {
-    console.error('Connection test failed:', error)
-
-    // 记录失败结果
-    testResults.value[configId] = {
-      success: false,
-      testType: 'text2image' // 默认值
-    }
-
-    toast.error(`${t('image.connection.testError')}: ${error instanceof Error ? error.message : String(error)}`)
-  } finally {
-    delete testingConnections.value[configId]
   }
+
+  if (!isRunningInElectron()) {
+    if (config?.provider?.corsRestricted) {
+      dialog.warning({
+        title: t('modelManager.corsRestrictedTag'),
+        content: () => h('div', { style: 'white-space: pre-line;' }, t('modelManager.corsRestrictedConfirm', { provider: config.provider.name || config.providerId })),
+        positiveText: t('common.confirm'),
+        negativeText: t('common.cancel'),
+        // Don't block dialog close while the async test runs.
+        onPositiveClick: () => {
+          void runTest()
+        }
+      })
+      return
+    }
+  }
+
+  await runTest()
 }
 
 const toggleConfig = async (config: { id: string; enabled: boolean }) => {
   try {
-    await updateConfig(config.id, { enabled: !config.enabled } as { enabled: boolean })
+    await updateConfig(config.id, { enabled: !config.enabled })
     await loadConfigs()
     toast.success(config.enabled ? t('modelManager.disableSuccess') : t('modelManager.enableSuccess'))
   } catch (error) {
     console.error('切换模型状态失败:', error)
-    toast.error(t('modelManager.toggleFailed', { error: error instanceof Error ? error.message : 'Unknown error' }))
+    toast.error(t('modelManager.toggleFailed', { error: getI18nErrorMessage(error, 'Unknown error') }))
   }
 }
 
@@ -275,7 +323,7 @@ const deleteConfig = async (configId: string) => {
       toast.success(t('modelManager.deleteSuccess'))
     } catch (error) {
       console.error('删除模型失败:', error)
-      toast.error(t('modelManager.deleteFailed', { error: error instanceof Error ? error.message : 'Unknown error' }))
+      toast.error(t('modelManager.deleteFailed', { error: getI18nErrorMessage(error, 'Unknown error') }))
     }
   }
 }

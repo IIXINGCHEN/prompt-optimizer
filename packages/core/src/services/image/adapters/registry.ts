@@ -5,6 +5,8 @@ import {
   ImageModel
 } from '../types'
 import { AbstractAdapterRegistry } from '../../adapters/abstract-registry'
+import { ImageError } from '../errors'
+import { IMAGE_ERROR_CODES } from '../../../constants/error-codes'
 import { GeminiImageAdapter } from './gemini'
 import { SeedreamImageAdapter } from './seedream'
 import { OpenAIImageAdapter } from './openai'
@@ -12,6 +14,7 @@ import { SiliconFlowImageAdapter } from './siliconflow'
 import { OpenRouterImageAdapter } from './openrouter'
 import { DashScopeImageAdapter } from './dashscope'
 import { ModelScopeImageAdapter } from './modelscope'
+import { OllamaImageAdapter } from './ollama'
 
 /**
  * 图像适配器注册表实现
@@ -26,6 +29,14 @@ export class ImageAdapterRegistry
   >
   implements IImageAdapterRegistry
 {
+  protected createUnknownProviderError(providerId: string): Error {
+    return new ImageError(IMAGE_ERROR_CODES.PROVIDER_NOT_FOUND, undefined, { providerId })
+  }
+
+  protected createDynamicModelUnsupportedError(provider: ImageProvider): Error {
+    return new ImageError(IMAGE_ERROR_CODES.DYNAMIC_MODELS_NOT_SUPPORTED, undefined, { providerName: provider.name })
+  }
+
   /**
    * 初始化并注册所有适配器
    */
@@ -38,6 +49,7 @@ export class ImageAdapterRegistry
     const openrouterAdapter = new OpenRouterImageAdapter()
     const dashscopeAdapter = new DashScopeImageAdapter()
     const modelscopeAdapter = new ModelScopeImageAdapter()
+    const ollamaAdapter = new OllamaImageAdapter()
 
     this.adapters.set('gemini', geminiAdapter)
     this.adapters.set('seedream', seedreamAdapter)
@@ -46,6 +58,7 @@ export class ImageAdapterRegistry
     this.adapters.set('openrouter', openrouterAdapter)
     this.adapters.set('dashscope', dashscopeAdapter)
     this.adapters.set('modelscope', modelscopeAdapter)
+    this.adapters.set('ollama', ollamaAdapter)
 
     // 预加载静态模型缓存
     this.preloadStaticModels()

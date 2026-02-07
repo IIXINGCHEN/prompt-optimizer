@@ -5,6 +5,7 @@ import { RecordNotFoundError, RecordValidationError, HistoryStorageError, Histor
 import { v4 as uuidv4 } from 'uuid';
 import { IModelManager } from '../model/types';
 import { CORE_SERVICE_KEYS } from '../../constants/storage-keys';
+import { HISTORY_ERROR_CODES, IMPORT_EXPORT_ERROR_CODES } from '../../constants/error-codes';
 import { ImportExportError } from '../../interfaces/import-export';
 
 /**
@@ -59,7 +60,11 @@ export class HistoryManager implements IHistoryManager {
           
           // Ensure record ID is unique
           if (records.some((r: PromptRecord) => r.id === record.id)) {
-            throw new HistoryError(`Record with ID ${record.id} already exists`);
+            throw new HistoryError(
+              HISTORY_ERROR_CODES.VALIDATION_ERROR,
+              { details: `Record with ID ${record.id} already exists` },
+              `Record with ID ${record.id} already exists`
+            );
           }
           
           // Add record to existing records (at the beginning)
@@ -287,7 +292,11 @@ export class HistoryManager implements IHistoryManager {
       // Get root record (version 1)
       const rootRecord = sortedRecords.find(r => r.version === 1);
       if (!rootRecord) {
-        throw new HistoryError(`Chain ${chainId} has no root record (version 1)`);
+        throw new HistoryError(
+          HISTORY_ERROR_CODES.CHAIN_ERROR,
+          { details: `Chain ${chainId} has no root record (version 1)` },
+          `Chain ${chainId} has no root record (version 1)`
+        );
       }
       
       // Get current record (highest version)
@@ -379,7 +388,8 @@ export class HistoryManager implements IHistoryManager {
       throw new ImportExportError(
         'Failed to export history data',
         await this.getDataType(),
-        error as Error
+        error as Error,
+        IMPORT_EXPORT_ERROR_CODES.EXPORT_FAILED,
       );
     }
   }
@@ -389,7 +399,10 @@ export class HistoryManager implements IHistoryManager {
    */
   async importData(data: any): Promise<void> {
     if (!(await this.validateData(data))) {
-      throw new Error('Invalid history data format: data must be an array of prompt records');
+      throw new RecordValidationError(
+        'Invalid history data format: data must be an array of prompt records',
+        [],
+      );
     }
 
     const records = data as PromptRecord[];

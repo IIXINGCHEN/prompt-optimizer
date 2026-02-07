@@ -22,7 +22,7 @@ const consoleLogger = new ConsoleLogger();
 // 立即设置全局错误处理器，确保任何异常都能被记录
 consoleLogger.setupGlobalErrorHandlers();
 
-const { app, BrowserWindow, ipcMain, shell, session } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, session, Menu } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const {
   buildReleaseUrl,
@@ -103,6 +103,71 @@ let modelManager, templateManager, historyManager, llmService, promptService, te
 let imageModelManager, imageService;
 let imageAdapterRegistry; // 全局引用以供 IPC 处理器使用
 let storageProvider; // 全局存储提供器引用，用于退出时保存数据
+
+// UI 当前语言（由渲染进程 i18n 选择决定）。
+// 说明：Electron 默认不会为输入框提供浏览器那种右键编辑菜单，
+// 我们在主进程中自行弹出菜单，并用该 locale 来决定菜单文案。
+let uiLocale = null;
+
+const SUPPORTED_UI_LOCALES = new Set(['zh-CN', 'zh-TW', 'en-US']);
+
+function normalizeUiLocale(locale) {
+  if (typeof locale !== 'string' || !locale) return null;
+  if (SUPPORTED_UI_LOCALES.has(locale)) return locale;
+
+  const lower = locale.toLowerCase();
+  if (lower.startsWith('zh')) {
+    // Covers: zh-TW / zh-HK / zh-Hant, etc.
+    if (lower.includes('tw') || lower.includes('hk') || lower.includes('hant')) return 'zh-TW';
+    return 'zh-CN';
+  }
+  if (lower.startsWith('en')) return 'en-US';
+  return null;
+}
+
+function getCurrentUiLocale() {
+  const fromUi = normalizeUiLocale(uiLocale);
+  if (fromUi) return fromUi;
+
+  try {
+    const fromSystem = typeof app.getLocale === 'function' ? app.getLocale() : null;
+    return normalizeUiLocale(fromSystem) || 'en-US';
+  } catch (_e) {
+    return 'en-US';
+  }
+}
+
+const CONTEXT_MENU_LABELS = {
+  'zh-CN': {
+    undo: '撤销',
+    redo: '重做',
+    cut: '剪切',
+    copy: '复制',
+    paste: '粘贴',
+    selectAll: '全选',
+  },
+  'zh-TW': {
+    undo: '復原',
+    redo: '重做',
+    cut: '剪下',
+    copy: '複製',
+    paste: '貼上',
+    selectAll: '全選',
+  },
+  'en-US': {
+    undo: 'Undo',
+    redo: 'Redo',
+    cut: 'Cut',
+    copy: 'Copy',
+    paste: 'Paste',
+    selectAll: 'Select All',
+  },
+};
+
+function getContextMenuLabels(locale) {
+  const normalized = normalizeUiLocale(locale) || 'en-US';
+  return CONTEXT_MENU_LABELS[normalized] || CONTEXT_MENU_LABELS['en-US'];
+}
 let isQuitting = false; // 防止重复保存数据的标志
 let isUpdaterQuitting = false; // 标识是否为更新安装退出，跳过数据保存
 let forceQuitTimer = null; // 强制退出定时器
@@ -348,6 +413,44 @@ function createWindow() {
     },
   });
 
+  // Enable native-like context menu for text inputs (cut/copy/paste/selectAll).
+  // Electron doesn't provide this by default, which makes right-click paste
+  // unavailable on Windows.
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+
+    const isEditable = Boolean(params.isEditable);
+    const selectionText = typeof params.selectionText === 'string' ? params.selectionText : '';
+    const hasSelection = selectionText.trim().length > 0;
+
+    const labels = getContextMenuLabels(getCurrentUiLocale());
+
+    // Avoid showing an empty menu on right-click.
+    if (!isEditable && !hasSelection) return;
+
+    const editFlags = params.editFlags || {};
+
+    const template = isEditable
+      ? [
+          { label: labels.undo, role: 'undo', enabled: Boolean(editFlags.canUndo) },
+          { label: labels.redo, role: 'redo', enabled: Boolean(editFlags.canRedo) },
+          { type: 'separator' },
+          { label: labels.cut, role: 'cut', enabled: Boolean(editFlags.canCut) },
+          { label: labels.copy, role: 'copy', enabled: Boolean(editFlags.canCopy) },
+          { label: labels.paste, role: 'paste', enabled: Boolean(editFlags.canPaste) },
+          { type: 'separator' },
+          { label: labels.selectAll, role: 'selectAll', enabled: Boolean(editFlags.canSelectAll) },
+        ]
+      : [
+          { label: labels.copy, role: 'copy', enabled: hasSelection },
+          { type: 'separator' },
+          { label: labels.selectAll, role: 'selectAll' },
+        ];
+
+    const menu = Menu.buildFromTemplate(template);
+    menu.popup({ window: mainWindow, x: params.x, y: params.y });
+  });
+
   // In development, we can point to the vite dev server
   if (process.env.NODE_ENV === 'development') {
     console.log('[Main Process] Running in development mode, loading from Vite dev server');
@@ -548,9 +651,37 @@ function createSuccessResponse(data) {
 
 function createErrorResponse(error) {
   console.error('[Main Process IPC Error]', error);
-  // 对于非 Error 实例，包装一下
-  const errorMessage = error instanceof Error ? error.message : String(error);
-  return { success: false, error: errorMessage };
+  // Always return a structured error payload so renderer can translate via `code + params`.
+  // This is safe even for legacy callers because preload normalizes both string/object.
+  return { success: false, error: normalizeIpcError(error) };
+}
+
+// Structured error payload for renderer-side i18n (code + params).
+function normalizeIpcError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+
+  const payload = { message };
+
+  if (error && typeof error === 'object') {
+    if (typeof error.code === 'string') {
+      payload.code = error.code;
+    }
+
+    if (error.params && typeof error.params === 'object') {
+      try {
+        payload.params = safeSerialize(error.params);
+      } catch (_) {
+        // Best-effort only; omit params if serialization fails.
+      }
+    }
+  }
+
+  return payload;
+}
+
+function createStructuredErrorResponse(error) {
+  // Backward-compat: keep the helper name used by newer handlers.
+  return createErrorResponse(error)
 }
 
 // 创建详细的错误响应，确保100%信息保真
@@ -720,6 +851,44 @@ function setupIPC() {
       };
 
       await llmService.sendMessageStream(messages, provider, callbacks);
+      return createSuccessResponse(null);
+    } catch (error) {
+      return createErrorResponse(error);
+    }
+  });
+
+  // Streaming handler with tools - supports tool-call events
+  ipcMain.handle('llm-sendMessageStreamWithTools', async (event, messages, provider, tools, streamId) => {
+    try {
+      const callbacks = {
+        onToken: (token) => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            event.sender.send(`stream-content-${streamId}`, token);
+          }
+        },
+        onReasoningToken: (thinking) => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            event.sender.send(`stream-thinking-${streamId}`, thinking);
+          }
+        },
+        onToolCall: (toolCall) => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            event.sender.send(`stream-tool-call-${streamId}`, toolCall);
+          }
+        },
+        onComplete: () => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            event.sender.send(`stream-finish-${streamId}`);
+          }
+        },
+        onError: (error) => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            event.sender.send(`stream-error-${streamId}`, error.message);
+          }
+        }
+      };
+
+      await llmService.sendMessageStreamWithTools(messages, provider, tools, callbacks);
       return createSuccessResponse(null);
     } catch (error) {
       return createErrorResponse(error);
@@ -1012,16 +1181,58 @@ function setupIPC() {
       const res = await imageService.generate(safeReq)
       return createSuccessResponse(res)
     } catch (error) {
-      return createErrorResponse(error)
+      return createStructuredErrorResponse(error)
     }
   })
+
+  // 显式模式：避免根据 inputImage 是否存在隐式推断
+  ipcMain.handle('image-generateText2Image', async (e, request) => {
+    try {
+      const safeReq = safeSerialize(request)
+      const res = await imageService.generateText2Image(safeReq)
+      return createSuccessResponse(res)
+    } catch (error) {
+      return createStructuredErrorResponse(error)
+    }
+  })
+
+  ipcMain.handle('image-generateImage2Image', async (e, request) => {
+    try {
+      const safeReq = safeSerialize(request)
+      const res = await imageService.generateImage2Image(safeReq)
+      return createSuccessResponse(res)
+    } catch (error) {
+      return createStructuredErrorResponse(error)
+    }
+  })
+
   ipcMain.handle('image-validateRequest', async (e, request) => {
     try {
       const safeReq = safeSerialize(request)
       const res = await imageService.validateRequest(safeReq)
       return createSuccessResponse(res)
     } catch (error) {
-      return createErrorResponse(error)
+      return createStructuredErrorResponse(error)
+    }
+  })
+
+  ipcMain.handle('image-validateText2ImageRequest', async (e, request) => {
+    try {
+      const safeReq = safeSerialize(request)
+      const res = await imageService.validateText2ImageRequest(safeReq)
+      return createSuccessResponse(res)
+    } catch (error) {
+      return createStructuredErrorResponse(error)
+    }
+  })
+
+  ipcMain.handle('image-validateImage2ImageRequest', async (e, request) => {
+    try {
+      const safeReq = safeSerialize(request)
+      const res = await imageService.validateImage2ImageRequest(safeReq)
+      return createSuccessResponse(res)
+    } catch (error) {
+      return createStructuredErrorResponse(error)
     }
   })
 
@@ -1029,21 +1240,13 @@ function setupIPC() {
   ipcMain.handle('image-testConnection', async (e, config) => {
     try {
       const safeCfg = safeSerialize(config)
-      const adapter = imageAdapterRegistry.getAdapter(safeCfg.providerId)
-      const model = safeCfg.model
-      // 选择测试类型
-      let testType = 'text2image'
-      const caps = model?.capabilities || {}
-      if (caps.text2image && !caps.image2image) testType = 'text2image'
-      else if (!caps.text2image && caps.image2image) testType = 'image2image'
-      else if (caps.text2image && caps.image2image) testType = 'text2image'
-      // 构建测试请求（适配器提供）
-      const baseReq = (adapter).getTestImageRequest ? (adapter).getTestImageRequest(testType) : { prompt: 'hello', count: 1 }
-      const request = { ...baseReq, configId: safeCfg.id || 'test' }
-      const result = await adapter.generate(request, safeCfg)
+      // Reuse ImageService.testConnection to keep behavior consistent with Web:
+      // - merges param overrides
+      // - enforces base64-only input for image2image tests
+      const result = await imageService.testConnection(safeCfg)
       return createSuccessResponse(result)
     } catch (error) {
-      return createErrorResponse(error)
+      return createStructuredErrorResponse(error)
     }
   })
 
@@ -1054,7 +1257,7 @@ function setupIPC() {
       const models = await imageAdapterRegistry.getDynamicModels(providerId, safeConn)
       return createSuccessResponse(models)
     } catch (error) {
-      return createErrorResponse(error)
+      return createStructuredErrorResponse(error)
     }
   })
 
@@ -1779,6 +1982,48 @@ function setupIPC() {
     }
   });
 
+  // Desktop: storage helpers for Data Manager UI
+  ipcMain.handle('data-getStorageInfo', async () => {
+    try {
+      const userDataPath = app.getPath('userData');
+      const mainFilePath = path.join(userDataPath, 'prompt-optimizer-data.json');
+      const backupFilePath = path.join(userDataPath, 'prompt-optimizer-data.json.backup');
+
+      const statSafe = async (p) => {
+        try {
+          const s = await require('fs').promises.stat(p);
+          return typeof s?.size === 'number' ? s.size : 0;
+        } catch {
+          return 0;
+        }
+      };
+
+      const mainSizeBytes = await statSafe(mainFilePath);
+      const backupSizeBytes = await statSafe(backupFilePath);
+
+      return createSuccessResponse({
+        userDataPath,
+        mainFilePath,
+        mainSizeBytes,
+        backupFilePath,
+        backupSizeBytes,
+        totalBytes: mainSizeBytes + backupSizeBytes,
+      });
+    } catch (error) {
+      return createErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('data-openStorageDirectory', async () => {
+    try {
+      const userDataPath = app.getPath('userData');
+      await shell.openPath(userDataPath);
+      return createSuccessResponse(true);
+    } catch (error) {
+      return createErrorResponse(error);
+    }
+  });
+
 
 
   // 环境配置同步 - 主进程作为唯一配置源
@@ -1830,6 +2075,17 @@ function setupIPC() {
       return createSuccessResponse(packageJson.version);
     } catch (error) {
       console.error('[Main Process] Failed to get app version:', error);
+      return createErrorResponse(error);
+    }
+  });
+
+  // UI locale sync (renderer -> main)
+  // Used to localize Electron-only UI like context menus.
+  ipcMain.handle('app-set-locale', (_event, locale) => {
+    try {
+      uiLocale = normalizeUiLocale(locale) || 'en-US';
+      return createSuccessResponse(null);
+    } catch (error) {
       return createErrorResponse(error);
     }
   });

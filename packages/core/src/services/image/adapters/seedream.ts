@@ -1,4 +1,5 @@
 import { AbstractImageProviderAdapter } from './abstract-adapter'
+import { ImageError } from '../errors'
 import type {
   ImageProvider,
   ImageModel,
@@ -6,6 +7,7 @@ import type {
   ImageResult,
   ImageModelConfig
 } from '../types'
+import { IMAGE_ERROR_CODES } from '../../../constants/error-codes'
 
 export class SeedreamImageAdapter extends AbstractImageProviderAdapter {
   protected normalizeBaseUrl(base: string): string {
@@ -19,6 +21,7 @@ export class SeedreamImageAdapter extends AbstractImageProviderAdapter {
       id: 'seedream',
       name: 'Seedream (火山方舟)',
       description: '火山方舟 Seedream 图像生成模型',
+      corsRestricted: true,
       requiresApiKey: true,
       defaultBaseURL: 'https://ark.cn-beijing.volces.com/api/v3',
       supportsDynamicModels: false,  // 不支持动态获取
@@ -164,7 +167,7 @@ export class SeedreamImageAdapter extends AbstractImageProviderAdapter {
       }
     }
 
-    throw new Error(`Unsupported test type: ${testType}`)
+    throw new ImageError(IMAGE_ERROR_CODES.UNSUPPORTED_TEST_TYPE, undefined, { testType })
   }
 
   protected async doGenerate(request: ImageRequest, config: ImageModelConfig): Promise<ImageResult> {
@@ -184,8 +187,6 @@ export class SeedreamImageAdapter extends AbstractImageProviderAdapter {
     if (request.inputImage?.b64) {
       const mime = request.inputImage.mimeType || 'image/png'
       payload.image = `data:${mime};base64,${request.inputImage.b64}`
-    } else if (request.inputImage?.url) {
-      payload.image = request.inputImage.url
     }
 
     // 生成数量固定为1（当前不支持多图）
@@ -209,17 +210,16 @@ export class SeedreamImageAdapter extends AbstractImageProviderAdapter {
     })) || []
 
     if (images.length === 0) {
-      throw new Error('No image data returned')
+      throw new ImageError(IMAGE_ERROR_CODES.INVALID_RESPONSE_FORMAT)
     }
 
-    return {
+      return {
       images,
       metadata: {
         providerId: 'seedream',
         modelId: config.modelId,
         configId: config.id,
-        usage: data.usage,
-        created: data.created
+        usage: data.usage
       }
     }
   }
@@ -235,7 +235,7 @@ export class SeedreamImageAdapter extends AbstractImageProviderAdapter {
       } catch {
         errorMessage = response.statusText
       }
-      throw new Error(`Seedream API error: ${response.status} ${errorMessage}`)
+      throw new ImageError(IMAGE_ERROR_CODES.GENERATION_FAILED, `Seedream API error: ${response.status} ${errorMessage}`)
     }
     return await response.json()
   }

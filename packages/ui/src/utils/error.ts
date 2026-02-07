@@ -4,6 +4,7 @@
  */
 
 import { useToast } from '../composables/ui/useToast'
+import { i18n } from '../plugins/i18n'
 
 /**
  * 扩展错误类型，支持更详细的错误信息
@@ -13,9 +14,11 @@ export interface ExtendedError extends Error {
   detailedMessage?: string
   /** 原始错误对象 */
   originalError?: unknown
-  /** 错误代码 */
+  /** 错误代码（i18n key） */
   code?: string
-  /** 错误上下文 */
+  /** i18n 插值参数 */
+  params?: Record<string, unknown>
+  /** 额外上下文（非 i18n 插值用） */
   context?: Record<string, unknown>
 }
 
@@ -49,8 +52,62 @@ export function getErrorMessage(error: unknown, fallback = 'Unknown error'): str
   if (error === null || error === undefined) {
     return fallback
   }
-  return String(error)
+
+  // IPC / cross-context errors may arrive as plain objects ({ message, code, params }).
+  if (typeof error === 'object') {
+    const maybeMessage = (error as { message?: unknown }).message
+    if (typeof maybeMessage === 'string' && maybeMessage.trim()) {
+      return maybeMessage
+    }
+  }
+
+  try {
+    return String(error)
+  } catch {
+    return fallback
+  }
 }
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+/**
+ * 将结构化错误（code + params）转换为用户可读的 i18n 文案。
+ *
+ * 规则：
+ * - 不解析 error.message（避免把 `[error.xxx] ...` 暴露给用户）
+ * - 只有在 i18n 存在该 key 时才使用翻译，否则回退到 getErrorMessage
+ */
+export function getI18nErrorMessage(error: unknown, fallback = 'Unknown error'): string {
+  if (!isRecord(error)) {
+    return getErrorMessage(error, fallback)
+  }
+
+  const code = typeof error.code === 'string' ? error.code : undefined
+  const params = isRecord(error.params) ? error.params : undefined
+
+  if (code) {
+    const hasKey = i18n.global.te(code)
+    if (hasKey) {
+      try {
+        return i18n.global.t(code, params ?? {})
+      } catch {
+        // If interpolation fails for any reason, fall back to raw error message.
+      }
+    }
+  }
+
+  const message = getErrorMessage(error, fallback)
+
+  // Avoid leaking internal error-code placeholders like "[error.xxx]" to users.
+  if (typeof fallback === 'string' && fallback.trim() && /^\[error\.[^\]]+\]/.test(message)) {
+    return fallback
+  }
+
+  return message
+}
+
 
 /**
  * 类型守卫：检查是否为 ExtendedError
@@ -115,6 +172,7 @@ export function createExtendedError(
     detailedMessage?: string
     originalError?: unknown
     code?: string
+    params?: Record<string, unknown>
     context?: Record<string, unknown>
   }
 ): ExtendedError {
@@ -130,6 +188,10 @@ export function createExtendedError(
 
   if (options?.code) {
     error.code = options.code
+  }
+
+  if (options?.params) {
+    error.params = options.params
   }
 
   if (options?.context) {
@@ -151,17 +213,7 @@ export function createErrorHandler(context: string) {
     handleError(error: unknown) {
       console.error(`[${context}]错误:`, error)
 
-      if (error instanceof AppError) {
-        toast.error(error.message)
-        return
-      }
-
-      if (error instanceof Error) {
-        toast.error(error.message || `${context}过程中发生错误`)
-        return
-      }
-
-      toast.error(`${context}过程中发生未知错误`)
+      toast.error(getI18nErrorMessage(error, `${context}过程中发生未知错误`))
     }
   }
 }

@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 import { IStorageProvider } from './types';
+import { StorageError } from './errors';
 
 /**
  * 数据表接口定义
@@ -11,14 +12,34 @@ interface StorageRecord {
 }
 
 /**
+ * 获取数据库名称
+ *
+ * 优先级：
+ * 1. 测试环境：使用注入的唯一数据库名称 (window.__TEST_DB_NAME__)
+ * 2. 生产环境：使用固定名称 'PromptOptimizerDB'
+ */
+function getDatabaseName(): string {
+  // 测试环境：从 window 对象读取测试数据库名称
+  if (typeof window !== 'undefined') {
+    const testDbName = (window as any).__TEST_DB_NAME__;
+    if (testDbName) {
+      return testDbName;
+    }
+  }
+
+  // 生产环境：使用固定名称
+  return 'PromptOptimizerDB';
+}
+
+/**
  * Dexie 数据库类
  */
 class PromptOptimizerDB extends Dexie {
   storage!: Table<StorageRecord, string>;
 
   constructor() {
-    super('PromptOptimizerDB');
-    
+    super(getDatabaseName());
+
     // 定义数据库结构
     this.version(1).stores({
       storage: 'key, value, timestamp'
@@ -77,7 +98,7 @@ export class DexieStorageProvider implements IStorageProvider {
       return record?.value ?? null;
     } catch (error) {
       console.error(`获取存储项失败 (${key}):`, error);
-      throw new Error(`Failed to get item: ${key}`);
+      throw new StorageError(`Failed to get item: ${key}`, 'read');
     }
   }
 
@@ -95,7 +116,7 @@ export class DexieStorageProvider implements IStorageProvider {
       });
     } catch (error) {
       console.error(`设置存储项失败 (${key}):`, error);
-      throw new Error(`Failed to set item: ${key}`);
+      throw new StorageError(`Failed to set item: ${key}`, 'write');
     }
   }
 
@@ -109,7 +130,7 @@ export class DexieStorageProvider implements IStorageProvider {
       await this.db.storage.delete(key);
     } catch (error) {
       console.error(`删除存储项失败 (${key}):`, error);
-      throw new Error(`Failed to remove item: ${key}`);
+      throw new StorageError(`Failed to remove item: ${key}`, 'delete');
     }
   }
 
@@ -123,7 +144,7 @@ export class DexieStorageProvider implements IStorageProvider {
       await this.db.storage.clear();
     } catch (error) {
       console.error('清空存储失败:', error);
-      throw new Error('Failed to clear storage');
+      throw new StorageError('Failed to clear storage', 'clear');
     }
   }
 
@@ -212,7 +233,10 @@ export class DexieStorageProvider implements IStorageProvider {
       }
     }
 
-    throw lastError || new Error(`Failed to perform atomic update after ${maxRetries} attempts`);
+    if (lastError) {
+      throw lastError
+    }
+    throw new StorageError(`Failed to perform atomic update after ${maxRetries} attempts`, 'write')
   }
 
   /**
@@ -240,7 +264,7 @@ export class DexieStorageProvider implements IStorageProvider {
       });
     } catch (error) {
       console.error(`简单更新失败 (${key}):`, error);
-      throw new Error(`Failed to perform simple update: ${key}`);
+      throw new StorageError(`Failed to perform simple update: ${key}`, 'write');
     }
   }
 
@@ -281,10 +305,13 @@ export class DexieStorageProvider implements IStorageProvider {
 
       // 如果是Dexie事务错误，提供更详细的错误信息
       if (this.isError(error) && error.name === 'PrematureCommitError') {
-        throw new Error(`Database transaction error for key ${key}: ${error.message}. Please try again.`);
+        throw new StorageError(
+          `Database transaction error for key ${key}: ${error.message}. Please try again.`,
+          'write',
+        );
       }
 
-      throw new Error(`Failed to perform atomic update: ${key}`);
+      throw new StorageError(`Failed to perform atomic update: ${key}`, 'write');
     }
   }
 
@@ -327,7 +354,7 @@ export class DexieStorageProvider implements IStorageProvider {
       });
     } catch (error) {
       console.error('批量更新失败:', error);
-      throw new Error('Failed to perform batch update');
+      throw new StorageError('Failed to perform batch update', 'write');
     }
   }
 
@@ -386,7 +413,7 @@ export class DexieStorageProvider implements IStorageProvider {
       return result;
     } catch (error) {
       console.error('导出数据失败:', error);
-      throw new Error('Failed to export data');
+      throw new StorageError('Failed to export data', 'read');
     }
   }
 
@@ -406,7 +433,7 @@ export class DexieStorageProvider implements IStorageProvider {
       await this.db.storage.bulkPut(records);
     } catch (error) {
       console.error('导入数据失败:', error);
-      throw new Error('Failed to import data');
+      throw new StorageError('Failed to import data', 'write');
     }
   }
 

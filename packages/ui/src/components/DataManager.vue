@@ -10,6 +10,47 @@
     @update:show="(value: boolean) => !value && close()"
   >
     <NSpace vertical :size="24">
+      <!-- Desktop Storage Info -->
+      <div v-if="isRunningInElectron() && storageInfo">
+        <NText tag="h3" :depth="1" strong style="font-size: 18px; margin-bottom: 12px;">
+          {{ $t('dataManager.storage.title') }}
+        </NText>
+        <NCard size="small" :bordered="true">
+          <NSpace vertical :size="12">
+            <div>
+              <NText depth="3" style="font-size: 12px">{{ $t('dataManager.storage.path') }}</NText>
+              <div style="word-break: break-all; font-family: monospace; font-size: 12px; margin-top: 4px;">
+                {{ storageInfo.userDataPath }}
+              </div>
+            </div>
+            
+            <NGrid :cols="3" :x-gap="12">
+              <NGridItem>
+                <NStatistic :label="$t('dataManager.storage.mainData')" :value="formatFileSize(storageInfo.mainSizeBytes)">
+                </NStatistic>
+              </NGridItem>
+              <NGridItem>
+                <NStatistic :label="$t('dataManager.storage.backup')" :value="formatFileSize(storageInfo.backupSizeBytes)">
+                </NStatistic>
+              </NGridItem>
+              <NGridItem>
+                <NStatistic :label="$t('dataManager.storage.total')" :value="formatFileSize(storageInfo.totalBytes)">
+                </NStatistic>
+              </NGridItem>
+            </NGrid>
+
+            <NSpace>
+              <NButton size="small" @click="openStorageDir">
+                {{ $t('dataManager.storage.openDir') }}
+              </NButton>
+              <NButton size="small" @click="refreshStorageInfo" :loading="isRefreshingStorage">
+                {{ $t('dataManager.storage.refresh') }}
+              </NButton>
+            </NSpace>
+          </NSpace>
+        </NCard>
+      </div>
+
       <!-- 导出功能 -->
       <div>
         <NText tag="h3" :depth="1" strong style="font-size: 18px; margin-bottom: 12px;">
@@ -68,7 +109,7 @@
                 {{ selectedFile.name }}
               </NText>
               <NText :depth="3" style="display: block; margin-bottom: 12px;">
-                {{ formatFileSize(selectedFile.size) }}
+                {{ formatFileSize(selectedFile.file?.size ?? 0) }}
               </NText>
               <NSpace>
                 <NButton text @click.stop="clearSelectedFile">
@@ -135,12 +176,14 @@
           <!-- 上下文导入 -->
           <!-- 文件导入 -->
           <NUpload
+            class="context-upload"
             :file-list="[]"
             accept=".json"
             :show-file-list="false"
             @change="handleContextFileChange"
             :custom-request="() => {}"
             :disabled="isContextImporting"
+            style="width: 100%;"
           >
             <NButton
               :disabled="isContextImporting"
@@ -183,10 +226,11 @@
 import { ref, computed, inject, onMounted, onUnmounted, type Ref } from 'vue'
 
 import { useI18n } from 'vue-i18n'
-import { 
-  NModal, NSpace, NText, NButton, NUpload, NUploadDragger, 
-  NIcon, NAlert, type UploadFileInfo 
+import {
+  NModal, NSpace, NText, NButton, NUpload, NUploadDragger,
+  NIcon, NAlert, NCard, NStatistic, NGrid, NGridItem, type UploadFileInfo
 } from 'naive-ui'
+import { isRunningInElectron, type ContextBundle } from '@prompt-optimizer/core'
 import { useToast } from '../composables/ui/useToast'
 import type { AppServices } from '../types/services'
 
@@ -229,18 +273,59 @@ const getDataManager = computed(() => {
 
 const isExporting = ref(false)
 const isImporting = ref(false)
-const selectedFile = ref<File | null>(null)
+const selectedFile = ref<UploadFileInfo | null>(null)
+
+const isContextBundle = (data: unknown): data is ContextBundle => {
+  if (!data || typeof data !== 'object') return false
+  const bundle = data as {
+    type?: unknown
+    version?: unknown
+    currentId?: unknown
+    contexts?: unknown
+  }
+  return (
+    bundle.type === 'context-bundle' &&
+    bundle.version === '1.0.0' &&
+    typeof bundle.currentId === 'string' &&
+    Array.isArray(bundle.contexts)
+  )
+}
 
 // 上下文导入导出状态
 const isContextExporting = ref(false)
 const isContextImporting = ref(false)
 const isContextImportingFromFile = ref(false) // 区分文件和剪贴板导入
 
+// Storage Info State
+const storageInfo = ref<{
+  userDataPath: string
+  mainSizeBytes: number
+  backupSizeBytes: number
+  totalBytes: number
+} | null>(null)
+const isRefreshingStorage = ref(false)
+
+const refreshStorageInfo = async () => {
+  if (!isRunningInElectron() || !window.electronAPI?.data) return
+  try {
+    isRefreshingStorage.value = true
+    storageInfo.value = await window.electronAPI.data.getStorageInfo()
+  } catch (error) {
+    console.error('Failed to get storage info:', error)
+    toast.error(t('dataManager.storage.refreshFailed'))
+  } finally {
+    isRefreshingStorage.value = false
+  }
+}
+
+const openStorageDir = () => {
+  if (!isRunningInElectron() || !window.electronAPI?.data) return
+  window.electronAPI.data.openStorageDirectory()
+}
+
 // 处理文件变化
 const handleFileChange = (options: { fileList: UploadFileInfo[] }) => {
-  if (options.fileList.length > 0 && options.fileList[0].file) {
-    selectedFile.value = options.fileList[0].file as File
-  }
+  selectedFile.value = options.fileList[0] ?? null
 }
 
 // --- Close Logic ---
@@ -257,6 +342,9 @@ const handleKeyDown = (event: KeyboardEvent) => {
 
 onMounted(() => {
   document.addEventListener('keydown', handleKeyDown)
+  if (isRunningInElectron()) {
+    refreshStorageInfo()
+  }
 })
 
 onUnmounted(() => {
@@ -306,11 +394,17 @@ const clearSelectedFile = () => {
 // 处理导入
 const handleImport = async () => {
   if (!selectedFile.value) return
-  
+
   try {
     isImporting.value = true
-    
-    const content = await selectedFile.value.text()
+
+    const file = selectedFile.value.file ?? null
+    if (!file) {
+      toast.error(t('dataManager.import.failed'))
+      return
+    }
+
+    const content = await file.text()
     const dataManager = getDataManager.value
     if (!dataManager) {
       toast.error(t('toast.error.dataManagerNotAvailable'))
@@ -428,8 +522,9 @@ const handleContextExportToClipboard = async () => {
 // 处理上下文文件选择和导入
 const handleContextFileChange = async (options: { fileList: UploadFileInfo[] }) => {
   if (options.fileList.length === 0 || !options.fileList[0].file) return
-  
-  const file = options.fileList[0].file as File
+
+  const file = options.fileList[0].file
+  if (!file) return
   await handleContextImportFromFile(file)
 }
 
@@ -464,6 +559,11 @@ const handleContextImportFromFile = async (file: File) => {
     }
     
     // 使用 importAll 并获取详细统计
+    if (!isContextBundle(importData)) {
+      toast.error(t('dataManager.context.invalidContextBundle'))
+      return
+    }
+
     const result = await contextRepo.importAll(importData, 'replace')
     
     // 显示详细的导入统计
@@ -526,6 +626,11 @@ const handleContextImportFromClipboard = async () => {
     }
     
     // 使用 importAll 并获取详细统计
+    if (!isContextBundle(importData)) {
+      toast.error(t('dataManager.context.invalidContextBundle'))
+      return
+    }
+
     const result = await contextRepo.importAll(importData, 'replace')
     
     // 显示详细的导入统计
@@ -545,4 +650,11 @@ const handleContextImportFromClipboard = async () => {
     isContextImportingFromFile.value = false
   }
 }
-</script> 
+</script>
+
+<style scoped>
+:deep(.context-upload .n-upload-trigger) {
+  width: 100%;
+  display: block;
+}
+</style>

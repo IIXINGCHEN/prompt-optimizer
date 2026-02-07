@@ -105,4 +105,73 @@ describe('LLMService', () => {
         .toThrow();
     });
   });
+
+  describe('testConnection', () => {
+    it('should allow connection test when model is disabled', async () => {
+      const mockConfig = createMockModelConfig();
+      const disabledConfig = { ...mockConfig, enabled: false };
+
+      await modelManager.addModel(disabledConfig.id, disabledConfig);
+
+      const adapter = registry.getAdapter(disabledConfig.providerMeta.id);
+      const sendSpy = vi
+        .spyOn(adapter, 'sendMessage')
+        .mockResolvedValue({ content: 'ok' });
+
+      await expect(service.testConnection(disabledConfig.id)).resolves.toBeUndefined();
+      expect(sendSpy).toHaveBeenCalled();
+    });
+
+    it('should still reject sendMessage when model is disabled', async () => {
+      const mockConfig = createMockModelConfig();
+      const disabledConfig = { ...mockConfig, enabled: false };
+
+      await modelManager.addModel(disabledConfig.id, disabledConfig);
+
+      await expect(
+        service.sendMessage([{ role: 'user', content: 'Hello' }], disabledConfig.id)
+      ).rejects.toThrow(RequestConfigError);
+    });
+  });
+
+  describe('fetchModelList', () => {
+    it('should reject when dynamic model fetch fails instead of silently falling back to static models', async () => {
+      const adapter = registry.getAdapter('openai');
+
+      const spy = vi
+        .spyOn(adapter, 'getModelsAsync')
+        .mockRejectedValue(new APIError('Unauthorized'));
+
+      await expect(
+        service.fetchModelList('openai', {
+          connectionConfig: {
+            apiKey: 'bad-key',
+            baseURL: adapter.getProvider().defaultBaseURL,
+          },
+        })
+      ).rejects.toThrow(APIError);
+
+      expect(spy).toHaveBeenCalled();
+    });
+
+    it('should return merged dynamic + static models when dynamic fetch succeeds', async () => {
+      const adapter = registry.getAdapter('openai');
+      const staticCount = adapter.getModels().length;
+      const dynamicModel = adapter.buildDefaultModel('dyn-1');
+
+      vi
+        .spyOn(adapter, 'getModelsAsync')
+        .mockResolvedValue([dynamicModel]);
+
+      const models = await service.fetchModelList('openai', {
+        connectionConfig: {
+          apiKey: 'ok-key',
+          baseURL: adapter.getProvider().defaultBaseURL,
+        },
+      });
+
+      expect(models[0]?.value).toBe('dyn-1');
+      expect(models).toHaveLength(staticCount + 1);
+    });
+  });
 }); 

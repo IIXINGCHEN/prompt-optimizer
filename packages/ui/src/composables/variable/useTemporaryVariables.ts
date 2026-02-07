@@ -1,25 +1,21 @@
 /**
  * 临时变量管理 Composable
  *
- * 功能说明：
- * - 管理会话级别的临时变量（不持久化，仅存在于内存中）
- * - 全局单例模式，确保所有组件访问同一实例
- * - 用于存储从文本提取的变量、测试区域的临时变量等
- *
- * 使用场景：
- * - 用户在输入框中提取的变量（提取后存为临时变量）
- * - 测试区域新增的测试变量
- * - 任何不需要持久化的会话级变量
- *
- * 与全局变量的区别：
- * - 全局变量：持久化存储，跨会话保留（通过 useVariableManager）
- * - 临时变量：仅在当前会话有效，刷新页面后丢失（通过 useTemporaryVariables）
+ * 特性：
+ * - Pro/Image：按子模式 session store 持久化（刷新不丢；子模式之间隔离）
+ * - Basic：维持旧行为，仅内存存储（刷新丢失）
+ * - 对外接口保持不变（兼容旧调用方）
+ * - 底层由 Pinia store 承载状态
  */
-
-import { ref, readonly, type Ref } from 'vue'
-
-// 全局单例状态
-const temporaryVariablesStore = ref<Record<string, string>>({})
+ 
+import { readonly, computed, type Ref } from 'vue'
+import { storeToRefs, getActivePinia } from 'pinia'
+import { useTemporaryVariablesStore } from '../../stores/temporaryVariables'
+import { useSessionManager } from '../../stores/session/useSessionManager'
+import { useProVariableSession } from '../../stores/session/useProVariableSession'
+import { useProMultiMessageSession } from '../../stores/session/useProMultiMessageSession'
+import { useImageText2ImageSession } from '../../stores/session/useImageText2ImageSession'
+import { useImageImage2ImageSession } from '../../stores/session/useImageImage2ImageSession'
 
 /**
  * 临时变量管理器接口
@@ -56,101 +52,171 @@ export interface TemporaryVariablesManager {
 /**
  * 使用临时变量管理器
  *
- * 特性：
- * - 全局单例：所有组件共享同一份临时变量
- * - 响应式：变量更新自动触发组件重渲染
- * - 轻量级：仅内存存储，无持久化开销
+ * ⚠️ 使用前提：
+ * 必须在应用入口已执行 `installPinia(app)` 后再调用。
+ * 如果在非组件上下文（如纯函数/服务层）使用，会抛出错误。
+ *
+ * @throws {Error} 如果 Pinia 未安装或无 active pinia instance
  *
  * @example
  * ```typescript
- * // 在任意组件中使用
- * const tempVars = useTemporaryVariables()
+ * // ✅ 正确：在组件或 setup 函数中使用
+ * export default defineComponent({
+ *   setup() {
+ *     const tempVars = useTemporaryVariables()
+ *     tempVars.setVariable('name', 'value')
+ *   }
+ * })
  *
- * // 设置临时变量
- * tempVars.setVariable('userName', 'Alice')
- *
- * // 获取变量值
- * const name = tempVars.getVariable('userName')
- *
- * // 清空所有临时变量
- * tempVars.clearAll()
+ * // ❌ 错误：在模块顶层或纯函数中使用
+ * const tempVars = useTemporaryVariables()  // 会抛出错误
  * ```
  */
 export function useTemporaryVariables(): TemporaryVariablesManager {
-
-  /**
-   * 设置临时变量
-   * @param name 变量名
-   * @param value 变量值
-   */
-  const setVariable = (name: string, value: string): void => {
-    temporaryVariablesStore.value[name] = value
+  // ✅ Codex 建议：显式检测 active pinia
+  // 避免 try-catch 吞掉配置错误，导致"静默不生效"
+  const activePinia = getActivePinia()
+  if (!activePinia) {
+    throw new Error(
+      '[useTemporaryVariables] Pinia not installed or no active pinia instance. ' +
+      'Make sure you have called installPinia(app) before using this composable, ' +
+      'and you are calling it within a component setup or after app is mounted.'
+    )
   }
 
-  /**
-   * 获取临时变量值
-   * @param name 变量名
-   * @returns 变量值，如果不存在返回 undefined
-   */
-  const getVariable = (name: string): string | undefined => {
-    return temporaryVariablesStore.value[name]
-  }
+  const globalStore = useTemporaryVariablesStore()
+  const { temporaryVariables: globalTempVars } = storeToRefs(globalStore)
 
-  /**
-   * 删除临时变量
-   * @param name 变量名
-   */
-  const deleteVariable = (name: string): void => {
-    delete temporaryVariablesStore.value[name]
-  }
+  const sessionManager = useSessionManager()
+  const proVariableSession = useProVariableSession()
+  const proMultiSession = useProMultiMessageSession()
+  const imageText2ImageSession = useImageText2ImageSession()
+  const imageImage2ImageSession = useImageImage2ImageSession()
 
-  /**
-   * 清空所有临时变量
-   */
-  const clearAll = (): void => {
-    temporaryVariablesStore.value = {}
-  }
+  const { temporaryVariables: proVariableTempVars } = storeToRefs(proVariableSession)
+  const { temporaryVariables: proMultiTempVars } = storeToRefs(proMultiSession)
+  const { temporaryVariables: imageText2ImageTempVars } = storeToRefs(imageText2ImageSession)
+  const { temporaryVariables: imageImage2ImageTempVars } = storeToRefs(imageImage2ImageSession)
 
-  /**
-   * 检查变量是否存在
-   * @param name 变量名
-   * @returns 是否存在
-   */
-  const hasVariable = (name: string): boolean => {
-    return name in temporaryVariablesStore.value
-  }
+  const activeSubModeKey = computed(() => sessionManager.getActiveSubModeKey())
 
-  /**
-   * 列出所有临时变量（返回副本，避免直接修改）
-   * @returns 所有临时变量的副本
-   */
-  const listVariables = (): Record<string, string> => {
-    return { ...temporaryVariablesStore.value }
-  }
-
-  /**
-   * 批量设置变量
-   * @param variables 变量键值对
-   */
-  const batchSet = (variables: Record<string, string>): void => {
-    temporaryVariablesStore.value = {
-      ...temporaryVariablesStore.value,
-      ...variables
+  const getActiveSessionTempRef = () => {
+    switch (activeSubModeKey.value) {
+      case 'pro-variable':
+        return proVariableTempVars
+      case 'pro-multi':
+        return proMultiTempVars
+      case 'image-text2image':
+        return imageText2ImageTempVars
+      case 'image-image2image':
+        return imageImage2ImageTempVars
+      default:
+        return null
     }
   }
 
-  /**
-   * 批量删除变量
-   * @param names 要删除的变量名列表
-   */
-  const batchDelete = (names: string[]): void => {
-    names.forEach(name => {
-      delete temporaryVariablesStore.value[name]
-    })
+  const temporaryVariables = computed<Record<string, string>>(() => {
+    const sessionRef = getActiveSessionTempRef()
+    return sessionRef ? sessionRef.value : globalTempVars.value
+  })
+
+  const hasOwn = (obj: Record<string, unknown>, key: string) =>
+    Object.prototype.hasOwnProperty.call(obj, key)
+
+  const setVariable = (name: string, value: string) => {
+    switch (activeSubModeKey.value) {
+      case 'pro-variable':
+        proVariableSession.setTemporaryVariable(name, value)
+        return
+      case 'pro-multi':
+        proMultiSession.setTemporaryVariable(name, value)
+        return
+      case 'image-text2image':
+        imageText2ImageSession.setTemporaryVariable(name, value)
+        return
+      case 'image-image2image':
+        imageImage2ImageSession.setTemporaryVariable(name, value)
+        return
+      default:
+        globalStore.setVariable(name, value)
+    }
+  }
+
+  const getVariable = (name: string): string | undefined => {
+    switch (activeSubModeKey.value) {
+      case 'pro-variable':
+        return proVariableSession.getTemporaryVariable(name)
+      case 'pro-multi':
+        return proMultiSession.getTemporaryVariable(name)
+      case 'image-text2image':
+        return imageText2ImageSession.getTemporaryVariable(name)
+      case 'image-image2image':
+        return imageImage2ImageSession.getTemporaryVariable(name)
+      default:
+        return globalStore.getVariable(name)
+    }
+  }
+
+  const deleteVariable = (name: string) => {
+    switch (activeSubModeKey.value) {
+      case 'pro-variable':
+        proVariableSession.deleteTemporaryVariable(name)
+        return
+      case 'pro-multi':
+        proMultiSession.deleteTemporaryVariable(name)
+        return
+      case 'image-text2image':
+        imageText2ImageSession.deleteTemporaryVariable(name)
+        return
+      case 'image-image2image':
+        imageImage2ImageSession.deleteTemporaryVariable(name)
+        return
+      default:
+        globalStore.deleteVariable(name)
+    }
+  }
+
+  const clearAll = () => {
+    switch (activeSubModeKey.value) {
+      case 'pro-variable':
+        proVariableSession.clearTemporaryVariables()
+        return
+      case 'pro-multi':
+        proMultiSession.clearTemporaryVariables()
+        return
+      case 'image-text2image':
+        imageText2ImageSession.clearTemporaryVariables()
+        return
+      case 'image-image2image':
+        imageImage2ImageSession.clearTemporaryVariables()
+        return
+      default:
+        globalStore.clearAll()
+    }
+  }
+
+  const hasVariable = (name: string) => {
+    return hasOwn(temporaryVariables.value, name)
+  }
+
+  const listVariables = () => {
+    return { ...temporaryVariables.value }
+  }
+
+  const batchSet = (variables: Record<string, string>) => {
+    for (const [name, value] of Object.entries(variables)) {
+      setVariable(name, value)
+    }
+  }
+
+  const batchDelete = (names: string[]) => {
+    for (const name of names) {
+      deleteVariable(name)
+    }
   }
 
   return {
-    temporaryVariables: readonly(temporaryVariablesStore),
+    temporaryVariables: readonly(temporaryVariables) as Readonly<Ref<Record<string, string>>>,
     setVariable,
     getVariable,
     deleteVariable,
@@ -158,6 +224,6 @@ export function useTemporaryVariables(): TemporaryVariablesManager {
     hasVariable,
     listVariables,
     batchSet,
-    batchDelete
+    batchDelete,
   }
 }

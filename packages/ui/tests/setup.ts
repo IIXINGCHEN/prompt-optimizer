@@ -9,6 +9,7 @@ import { createI18n } from 'vue-i18n'
 import zhCN from '../src/i18n/locales/zh-CN'
 import zhTW from '../src/i18n/locales/zh-TW'
 import enUS from '../src/i18n/locales/en-US'
+import { setupErrorDetection } from './utils/error-detection'
 
 // 创建测试用的 i18n 实例
 const i18n = createI18n({
@@ -140,4 +141,47 @@ Object.assign(Element.prototype, {
   scrollIntoView: vi.fn(),
 })
 
+// CodeMirror relies on Range geometry methods which are incomplete in jsdom.
+// Provide a minimal polyfill to avoid noisy test stderr.
+if (typeof Range !== 'undefined') {
+  const proto = Range.prototype as any
+  if (typeof proto.getClientRects !== 'function') {
+    proto.getClientRects = () => []
+  }
+  if (typeof proto.getBoundingClientRect !== 'function') {
+    proto.getBoundingClientRect = () => ({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      bottom: 0,
+      right: 0,
+      width: 0,
+      height: 0,
+      toJSON: () => ({})
+    })
+  }
+}
+
 console.log('[Test Setup] Global browser API mocks initialized')
+
+// ========== Pinia 服务清理（防止测试污染）==========
+import { afterEach } from 'vitest'
+import { setPiniaServices } from '../src/plugins/pinia'
+
+/**
+ * 全局测试清理：确保每个测试用例后都清理 Pinia 服务
+ * 避免测试用例之间的状态污染
+ *
+ * 这是 Codex 建议的"兜底机制"：
+ * - 即使测试用例忘记手动清理，全局 afterEach 也会自动清理
+ * - 配合 pinia-test-helpers.ts 中的 helper 使用效果更佳
+ */
+afterEach(() => {
+  setPiniaServices(null)
+})
+
+console.log('[Test Setup] Pinia services cleanup registered')
+
+// ========== UI 错误检测（console + 未捕获异常）==========
+setupErrorDetection()

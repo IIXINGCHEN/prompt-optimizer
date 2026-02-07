@@ -7,7 +7,15 @@ import { IStorageProvider } from '../storage/types'
 import { StorageAdapter } from '../storage/adapter'
 import { CORE_SERVICE_KEYS } from '../../constants/storage-keys'
 import { ImportExportError } from '../../interfaces/import-export'
+import { IMAGE_ERROR_CODES, IMPORT_EXPORT_ERROR_CODES, type ErrorParams } from '../../constants/error-codes'
+import { BaseError } from '../llm/errors'
 import { getDefaultImageModels, getBuiltinImageConfigIds } from './defaults'
+
+class ImageModelManagerError extends BaseError {
+  constructor(code: string, message?: string, params?: ErrorParams) {
+    super(code, message, params)
+  }
+}
 
 /**
  * 图像模型管理器：专注于配置管理，遵循新的三层架构
@@ -119,7 +127,11 @@ export class ImageModelManager implements IImageModelManager {
       (current) => {
         const data = current || {}
         if (data[toStore.id]) {
-          throw new Error(`Configuration with id '${toStore.id}' already exists`)
+          throw new ImageModelManagerError(
+            IMAGE_ERROR_CODES.CONFIG_ALREADY_EXISTS,
+            undefined,
+            { configId: toStore.id },
+          )
         }
         return { ...data, [toStore.id]: toStore }
       }
@@ -132,7 +144,11 @@ export class ImageModelManager implements IImageModelManager {
       (current) => {
         const data = current || {}
         if (!data[id]) {
-          throw new Error(`Configuration with id '${id}' does not exist`)
+          throw new ImageModelManagerError(
+            IMAGE_ERROR_CODES.CONFIG_DOES_NOT_EXIST,
+            undefined,
+            { configId: id },
+          )
         }
 
         const updated: ImageModelConfig = {
@@ -247,7 +263,8 @@ export class ImageModelManager implements IImageModelManager {
       throw new ImportExportError(
         'Failed to export image model configurations',
         await this.getDataType(),
-        error as Error
+        error as Error,
+        IMPORT_EXPORT_ERROR_CODES.EXPORT_FAILED,
       )
     }
   }
@@ -256,7 +273,9 @@ export class ImageModelManager implements IImageModelManager {
     if (!Array.isArray(data)) {
       throw new ImportExportError(
         'Invalid data format: expected array of ImageModelConfig',
-        await this.getDataType()
+        await this.getDataType(),
+        undefined,
+        IMPORT_EXPORT_ERROR_CODES.VALIDATION_ERROR,
       )
     }
 
@@ -331,8 +350,39 @@ export class ImageModelManager implements IImageModelManager {
 
   // 确保配置是自包含的（包含完整的provider和model信息）
   private ensureSelfContained(config: ImageModelConfig): ImageModelConfig {
-    // 如果已经有完整的自包含字段，直接返回
+    // 如果已经有完整的自包含字段，尽量补齐新增的 provider 字段（保持向后兼容）
     if (config.provider && config.model) {
+      const providerId = (config.provider.id || config.providerId || '').toLowerCase()
+
+      // Historical metadata might incorrectly mark Ollama as CORS-restricted.
+      // Ollama can be configured (CORS/reverse-proxy), so we force-disable the tag.
+      if (providerId === 'ollama' && config.provider.corsRestricted !== false) {
+        return {
+          ...config,
+          provider: {
+            ...config.provider,
+            corsRestricted: false
+          }
+        }
+      }
+
+      // 旧存储数据里 provider 可能缺少新字段；用当前 adapter 的 provider 元数据补齐。
+      if (config.provider.corsRestricted === undefined) {
+        try {
+          const latestProvider = this.registry.getAdapter(config.providerId).getProvider()
+          if (latestProvider.corsRestricted !== undefined) {
+            return {
+              ...config,
+              provider: {
+                ...config.provider,
+                corsRestricted: latestProvider.corsRestricted
+              }
+            }
+          }
+        } catch {
+          // ignore - unknown provider or adapter failure
+        }
+      }
       return config
     }
 
@@ -486,7 +536,11 @@ export class ImageModelManager implements IImageModelManager {
     // 因此不需要在此验证模型是否存在
 
     if (errors.length > 0) {
-      throw new Error(`Invalid configuration: ${errors.join(', ')}`)
+      throw new ImageModelManagerError(
+        IMAGE_ERROR_CODES.CONFIG_INVALID,
+        errors.join(', '),
+        { details: errors.join(', ') },
+      )
     }
   }
 }

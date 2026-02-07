@@ -3,6 +3,7 @@
     :bordered="false"
     class="output-display-core h-full  max-height: 100% "
     content-style="padding: 0; height: 100%; max-height: 100%; display: flex; flex-direction: column; overflow: hidden;"
+    :data-testid="testId"
   >
     <NFlex vertical style="height: 100%; min-height: 0; overflow: hidden;">
       <!-- 统一顶层工具栏 -->
@@ -37,7 +38,9 @@
         </NButtonGroup>
         
         <!-- 右侧：操作按钮 -->
-        <NButtonGroup>
+        <NFlex align="center" :size="8" :wrap="false">
+          <slot name="toolbar-right-extra"></slot>
+          <NButtonGroup>
           <NButton
             v-if="isActionEnabled('favorite')"
             @click="handleFavorite"
@@ -81,7 +84,8 @@
               </NIcon>
             </template>
           </NButton>
-        </NButtonGroup>
+          </NButtonGroup>
+        </NFlex>
       </NFlex>
 
       <!-- 推理内容区域 -->
@@ -195,13 +199,13 @@ import { Star } from '@vicons/tabler'
 import { useClipboard } from '../composables/ui/useClipboard'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import TextDiffUI from './TextDiff.vue'
-import type { CompareResult } from '@prompt-optimizer/core'
+import type { CompareResult, ICompareService } from '@prompt-optimizer/core'
 import { VariableAwareInput } from './variable-extraction'
-import { useFunctionMode } from '../composables/mode/useFunctionMode'
 import { useTemporaryVariables } from '../composables/variable/useTemporaryVariables'
+import { useVariableAwareInputBridge } from '../composables/variable/useVariableAwareInputBridge'
 import { useVariableManager } from '../composables/prompt/useVariableManager'
 import type { AppServices } from '../types/services'
-import { platform } from '../utils/platform'
+import { router as routerInstance } from '../router'
 
 type ActionName = 'fullscreen' | 'diff' | 'copy' | 'edit' | 'reasoning' | 'favorite'
 
@@ -211,7 +215,7 @@ const { copyText } = useClipboard()
 const message = useToast()
 
 // 🆕 注入 services（用于变量管理）
-const services = inject<Ref<AppServices | null>>('services', ref(null))
+const services = inject<Ref<AppServices | null>>('services') ?? ref<AppServices | null>(null)
 
 // 移除收藏状态管理(改由父组件处理)
 
@@ -221,6 +225,9 @@ interface Props {
   content?: string
   originalContent?: string
   reasoning?: string
+
+  /** E2E/测试定位用的 data-testid（挂在组件根节点） */
+  testId?: string
   
   // 显示模式
   mode: 'readonly' | 'editable'
@@ -238,19 +245,22 @@ interface Props {
   streaming?: boolean
   
   // 服务
-  compareService: ICompareService
+  compareService?: ICompareService
 }
 
 const props = withDefaults(defineProps<Props>(), {
   content: '',
   originalContent: '',
   reasoning: '',
+  testId: undefined,
   mode: 'readonly',
   reasoningMode: 'auto',
   enabledActions: () => ['fullscreen', 'diff', 'copy', 'edit', 'reasoning', 'favorite'],
   height: '100%',
   placeholder: ''
 })
+
+const testId = computed(() => props.testId || undefined)
 
 // 事件定义
 const emit = defineEmits<{
@@ -265,14 +275,16 @@ const emit = defineEmits<{
   'save-favorite': [data: { content: string; originalContent?: string }]
 }>()
 
-// 🆕 变量管理功能（仅 Pro 模式）
-// ==================== 功能模式判断 ====================
-// ✅ 无条件调用，使用全局单例的 functionMode
-// ⚠️ 不主动初始化，避免在 services 未就绪时污染全局单例
-const { functionMode } = useFunctionMode(services)
+// 🆕 变量管理功能（Pro / Image 模式）
+// 当前架构以路由为单一真源；不要依赖 legacy 的 Preference-based functionMode。
+const routeFunctionMode = computed<'basic' | 'pro' | 'image'>(() => {
+  const path = routerInstance.currentRoute.value.path || ''
+  if (path.startsWith('/pro')) return 'pro'
+  if (path.startsWith('/image')) return 'image'
+  return 'basic'
+})
 
-// 判断是否启用变量功能（仅 Pro 模式）
-const shouldEnableVariables = computed(() => functionMode.value === 'pro')
+const shouldEnableVariables = computed(() => routeFunctionMode.value === 'pro' || routeFunctionMode.value === 'image')
 
 // ==================== 变量管理 Composables ====================
 // 临时变量管理器（全局单例）
@@ -281,125 +293,36 @@ const tempVars = useTemporaryVariables()
 // ✅ 无条件调用，composable 内部会等待 services.preferenceService 准备就绪
 const globalVarsManager = useVariableManager(services)
 
-// ==================== 变量数据计算 ====================
-/**
- * 计算纯预定义变量
- * allVariables = 预定义变量 + 自定义全局变量
- * 因此：预定义变量 = allVariables - customVariables
- */
-const purePredefinedVariables = computed(() => {
-  const all = globalVarsManager.allVariables.value || {}
-  const custom = globalVarsManager.customVariables.value || {}
-
-  const predefined: Record<string, string> = {}
-  for (const [key, value] of Object.entries(all)) {
-    // 只保留不在 customVariables 中的变量
-    if (!(key in custom)) {
-      predefined[key] = value
-    }
-  }
-
-  return predefined
+const {
+  variableInputData: variableData,
+  handleVariableExtracted,
+  handleAddMissingVariable,
+} = useVariableAwareInputBridge({
+  enabled: shouldEnableVariables,
+  isReady: globalVarsManager.isReady,
+  globalVariables: globalVarsManager.customVariables,
+  temporaryVariables: tempVars.temporaryVariables,
+  allVariables: globalVarsManager.allVariables,
+  saveGlobalVariable: (name, value) => globalVarsManager.addVariable(name, value),
+  saveTemporaryVariable: (name, value) => tempVars.setVariable(name, value),
+  logPrefix: 'OutputDisplayCore',
 })
-
-const variableData = computed(() => {
-  // 只在 Pro 模式下提供变量数据
-  if (!shouldEnableVariables.value) return null
-
-  // 🔒 如果全局变量管理器未就绪，返回 null 以禁用变量功能
-  // 这样可以避免文本被替换但变量未保存的不一致状态
-  if (!globalVarsManager.isReady.value) return null
-
-  return {
-    existingGlobalVariables: Object.keys(globalVarsManager.customVariables.value || {}),
-    existingTemporaryVariables: Object.keys(tempVars.temporaryVariables.value || {}),
-    predefinedVariables: Object.keys(purePredefinedVariables.value),
-    globalVariableValues: globalVarsManager.customVariables.value || {},
-    temporaryVariableValues: tempVars.temporaryVariables.value || {},
-    predefinedVariableValues: purePredefinedVariables.value
-  }
-})
-
-// ==================== 变量事件处理 ====================
-/**
- * 处理变量提取事件
- * 在 Pro 模式的原文编辑模式下，用户选中文本提取变量时触发
- *
- * ⚠️ 注意：此函数只会在 variableData 不为 null 时被调用
- * （即管理器已就绪且为 Pro 模式），因此不需要额外检查
- *
- * ⚠️ 数据一致性问题：
- * VariableAwareInput 在触发此事件前已完成文本替换（{{varName}}）
- * 如果保存失败，文本已被修改但变量未保存，需提示用户撤销操作
- */
-const handleVariableExtracted = (data: {
-  variableName: string
-  variableValue: string
-  variableType: 'global' | 'temporary'
-}) => {
-  if (data.variableType === 'global') {
-    try {
-      // 保存到全局变量
-      globalVarsManager.addVariable(data.variableName, data.variableValue)
-      message.success(
-        t('variableExtraction.savedToGlobal', { name: data.variableName })
-      )
-    } catch (error) {
-      console.error('[OutputDisplayCore] Failed to save global variable:', error)
-      // ⚠️ 保存失败但文本已被替换，提示用户需要撤销
-      message.error(
-        t('variableExtraction.saveFailedWithUndo', {
-          name: data.variableName,
-          undo: platform.getUndoKey()
-        }),
-        {
-          duration: 8000, // 延长显示时间，确保用户看到
-          closable: true
-        }
-      )
-    }
-  } else {
-    // 保存到临时变量（临时变量管理器是全局单例，始终可用）
-    try {
-      tempVars.setVariable(data.variableName, data.variableValue)
-      message.success(
-        t('variableExtraction.savedToTemporary', { name: data.variableName })
-      )
-    } catch (error) {
-      console.error('[OutputDisplayCore] Failed to save temporary variable:', error)
-      // 临时变量保存失败的可能性极低，但仍需处理
-      message.error(
-        t('variableExtraction.saveFailedWithUndo', {
-          name: data.variableName,
-          undo: platform.getUndoKey()
-        }),
-        {
-          duration: 8000,
-          closable: true
-        }
-      )
-    }
-  }
-}
-
-/**
- * 处理添加缺失变量事件
- * 当用户悬停在缺失变量上并点击快速添加时触发
- */
-const handleAddMissingVariable = (varName: string) => {
-  tempVars.setVariable(varName, '')
-  message.success(
-    t('variableDetection.addSuccess', { name: varName })
-  )
-}
 
 // 内部状态
-const reasoningContentRef = ref<HTMLDivElement | null>(null)
+type ScrollbarLike = {
+  scrollTo: (options: { top: number; behavior?: ScrollBehavior }) => void
+}
+
+const reasoningContentRef = ref<ScrollbarLike | null>(null)
 const userHasManuallyToggledReasoning = ref(false)
 
 // 新的视图状态机
 const internalViewMode = ref<'render' | 'source' | 'diff'>('render')
-const compareResult = ref<CompareResult | undefined>()
+const EMPTY_COMPARE_RESULT: CompareResult = {
+  fragments: [],
+  summary: { additions: 0, deletions: 0, unchanged: 0 },
+}
+const compareResult = ref<CompareResult>(EMPTY_COMPARE_RESULT)
 
 // 推理折叠面板状态
 const reasoningExpandedNames = ref<string[]>([])
@@ -481,20 +404,10 @@ const scrollReasoningToBottom = () => {
   if (reasoningContentRef.value) {
     nextTick(() => {
       if (reasoningContentRef.value) {
-        // 使用 Naive UI NScrollbar 的正确 API
-        const scrollContainer = reasoningContentRef.value.$el || reasoningContentRef.value
-        if (scrollContainer && scrollContainer.scrollTo) {
-          scrollContainer.scrollTo({
-            top: scrollContainer.scrollHeight,
-            behavior: 'smooth'
-          })
-        } else if (reasoningContentRef.value.scrollTo) {
-          // 直接调用 NScrollbar 实例的 scrollTo 方法
-          reasoningContentRef.value.scrollTo({
-            top: 999999,  // 滚动到底部
-            behavior: 'smooth'
-          })
-        }
+        reasoningContentRef.value.scrollTo({
+          top: 999999, // 滚动到底部
+          behavior: 'smooth'
+        })
       }
     })
   }
@@ -504,19 +417,20 @@ const scrollReasoningToBottom = () => {
 const updateCompareResult = async () => {
   if (internalViewMode.value === 'diff' && props.originalContent && props.content) {
     try {
-      if (!props.compareService) {
-        throw new Error('CompareService is required but not provided')
-      }
-      compareResult.value = await props.compareService.compareTexts(
+      const compareService = props.compareService ?? services.value?.compareService
+      if (!compareService) throw new Error('CompareService not available')
+
+      compareResult.value = await compareService.compareTexts(
         props.originalContent,
         props.content
       )
     } catch (error) {
-      console.error('Error calculating diff:', error)
-      throw error
+      console.error('[OutputDisplayCore] Error calculating diff:', error)
+      message.warning(t('toast.warning.compareFailed'))
+      compareResult.value = EMPTY_COMPARE_RESULT
     }
   } else {
-    compareResult.value = undefined
+    compareResult.value = EMPTY_COMPARE_RESULT
   }
 }
 
@@ -591,6 +505,10 @@ const resetReasoningState = (initialState: boolean) => {
 }
 
 const forceExitEditing = () => {
+  // In Pro/Image (variable-enabled) workspaces, keep source view as the default
+  // to preserve variable highlighting instead of flipping back to Markdown.
+  if (shouldEnableVariables.value) return
+
   internalViewMode.value = 'render'
 }
 
@@ -637,4 +555,3 @@ watch(() => props.mode, (newMode) => {
 
 defineExpose({ resetReasoningState, forceRefreshContent, forceExitEditing })
 </script>
-

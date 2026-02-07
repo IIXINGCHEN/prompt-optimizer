@@ -57,6 +57,15 @@
         :ghost="false"
         :round="true"
     />
+    <ActionButtonUI
+        icon="🔣"
+        :text="$t('nav.variableManager')"
+        @click="emit('open-variables')"
+        type="default"
+        size="medium"
+        :ghost="false"
+        :round="true"
+    />
     <!-- 辅助功能区 - 使用简化样式降低视觉权重 -->
     <ThemeToggleUI />
     <ActionButtonUI
@@ -64,7 +73,7 @@
         text=""
         @click="emit('open-github')"
         size="small"
-        type="quaternary"
+        type="default"
         :ghost="true"
     >
         <template #icon>
@@ -130,6 +139,8 @@ const emit = defineEmits<{
     'open-favorites': []
     /** 打开数据管理器 */
     'open-data-manager': []
+    /** 打开变量管理器 */
+    'open-variables': []
     /** 打开 GitHub 仓库 */
     'open-github': []
 }>()

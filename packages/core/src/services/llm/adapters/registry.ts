@@ -15,6 +15,8 @@ import { ZhipuAdapter } from './zhipu-adapter';
 import { DashScopeAdapter } from './dashscope-adapter';
 import { OpenRouterAdapter } from './openrouter-adapter';
 import { ModelScopeAdapter } from './modelscope-adapter';
+import { OllamaAdapter } from './ollama-adapter';
+import { RequestConfigError } from '../errors';
 
 /**
  * 文本模型适配器注册表实现
@@ -29,6 +31,18 @@ export class TextAdapterRegistry
   >
   implements ITextAdapterRegistry
 {
+  protected createUnknownProviderError(providerId: string): Error {
+    return new RequestConfigError(
+      `Unknown ${this.getProviderTypeDescription()}: ${providerId}`,
+    );
+  }
+
+  protected createDynamicModelUnsupportedError(provider: TextProvider): Error {
+    return new RequestConfigError(
+      `${provider.name} does not support dynamic model fetching`,
+    );
+  }
+
   /**
    * 初始化并注册所有适配器
    */
@@ -43,6 +57,7 @@ export class TextAdapterRegistry
     const dashscopeAdapter = new DashScopeAdapter();
     const openrouterAdapter = new OpenRouterAdapter();
     const modelscopeAdapter = new ModelScopeAdapter();
+    const ollamaAdapter = new OllamaAdapter();
 
     this.adapters.set('openai', openaiAdapter);
     this.adapters.set('deepseek', deepseekAdapter);
@@ -53,6 +68,7 @@ export class TextAdapterRegistry
     this.adapters.set('dashscope', dashscopeAdapter);
     this.adapters.set('openrouter', openrouterAdapter);
     this.adapters.set('modelscope', modelscopeAdapter);
+    this.adapters.set('ollama', ollamaAdapter);
 
     // 预加载静态模型缓存
     this.preloadStaticModels();
@@ -81,7 +97,9 @@ export class TextAdapterRegistry
   ): Promise<TextModel[]> {
     if (!adapter.getModelsAsync) {
       const provider = adapter.getProvider();
-      throw new Error(`Adapter ${provider.name} does not implement getModelsAsync method`);
+      throw new RequestConfigError(
+        `Adapter ${provider.name} does not implement getModelsAsync method`,
+      );
     }
     return await adapter.getModelsAsync(config);
   }

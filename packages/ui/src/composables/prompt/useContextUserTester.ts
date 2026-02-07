@@ -1,7 +1,7 @@
 import { reactive, type Ref } from 'vue'
 import { useToast } from '../ui/useToast'
 import { useI18n } from 'vue-i18n'
-import { getErrorMessage } from '../../utils/error'
+import { getI18nErrorMessage } from '../../utils/error'
 import type { AppServices } from '../../types/services'
 import type { ConversationMessage } from '../../types/variable'
 import type { VariableManagerHooks } from './useVariableManager'
@@ -76,8 +76,17 @@ export function useContextUserTester(
   const toast = useToast()
   const { t } = useI18n()
 
+  type InternalTesterState = UseContextUserTester & {
+    testPromptWithType: (
+      type: 'original' | 'optimized',
+      prompt: string,
+      optimizedPrompt: string,
+      testVars?: Record<string, string>
+    ) => Promise<void>
+  }
+
   // 创建响应式状态对象
-  const state = reactive<UseContextUserTester>({
+  const state = reactive<InternalTesterState>({
     // 测试结果状态
     testResults: {
       // 原始提示词结果
@@ -224,7 +233,7 @@ export function useContextUserTester(
         )
       } catch (error: unknown) {
         console.error(`[useContextUserTester] ${type} test error:`, error)
-        const errorMessage = getErrorMessage(error) || t('test.error.failed')
+        const errorMessage = getI18nErrorMessage(error, t('test.error.failed'))
         const testTypeKey = type === 'original' ? 'originalTestFailed' : 'optimizedTestFailed'
         toast.error(`${t(`test.error.${testTypeKey}`)}: ${errorMessage}`)
       } finally {
@@ -236,7 +245,7 @@ export function useContextUserTester(
         }
       }
     },
-  } as UseContextUserTester)
+  })
 
-  return state
+  return state as UseContextUserTester
 }

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { OpenRouterImageAdapter } from '../../../src/services/image/adapters/openrouter'
 import type { ImageModelConfig } from '../../../src/services/image/types'
+import { IMAGE_ERROR_CODES } from '../../../src/constants/error-codes'
 
 describe('OpenRouterImageAdapter', () => {
   let adapter: OpenRouterImageAdapter
@@ -33,8 +34,8 @@ describe('OpenRouterImageAdapter', () => {
     it('should provide static models list', () => {
       const models = adapter.getModels()
 
-      expect(models).toHaveLength(1)
-      expect(models[0].id).toBe('google/gemini-2.5-flash-image-preview')
+      expect(models.length).toBeGreaterThan(0)
+      expect(models[0].id).toBe('google/gemini-2.5-flash-image')
       expect(models[0].name).toBe('Gemini 2.5 Flash Image (Nano Banana)')
       expect(models[0].providerId).toBe('openrouter')
     })
@@ -99,11 +100,12 @@ describe('OpenRouterImageAdapter', () => {
     let mockConfig: ImageModelConfig
 
     beforeEach(() => {
+      const modelId = adapter.getModels()[0].id
       mockConfig = {
         id: 'test-config',
         name: 'Test Config',
         providerId: 'openrouter',
-        modelId: 'google/gemini-2.5-flash-image-preview',
+        modelId,
         enabled: true,
         connectionConfig: {
           apiKey: 'test-api-key'
@@ -130,9 +132,12 @@ describe('OpenRouterImageAdapter', () => {
         configId: 'test-config'
       }
 
-      expect(() => {
+      try {
         adapter['validateRequest'](request, mockConfig)
-      }).toThrow('Prompt is required')
+        throw new Error('Expected validateRequest to throw')
+      } catch (error) {
+        expect(error).toMatchObject({ code: IMAGE_ERROR_CODES.PROMPT_EMPTY })
+      }
     })
 
     it('should validate config without errors', () => {
@@ -147,9 +152,12 @@ describe('OpenRouterImageAdapter', () => {
         connectionConfig: {}
       }
 
-      expect(() => {
+      try {
         adapter['validateConfig'](configWithoutKey)
-      }).toThrow('OpenRouter requires API key')
+        throw new Error('Expected validateConfig to throw')
+      } catch (error) {
+        expect(error).toMatchObject({ code: IMAGE_ERROR_CODES.API_KEY_REQUIRED })
+      }
     })
   })
 

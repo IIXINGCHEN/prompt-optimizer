@@ -1,7 +1,9 @@
 // Naive UI 主题配置 - 全面基于 Naive UI 的 themeOverrides 系统
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 import { darkTheme, lightTheme, type GlobalThemeOverrides, type GlobalTheme } from 'naive-ui'
+import { pinia } from '../plugins/pinia'
+import { useGlobalSettings } from '../stores/settings/useGlobalSettings'
 
 // 当前主题ID
 export const currentThemeId = ref<string>('light')
@@ -749,24 +751,114 @@ export const currentThemeOverrides = computed<GlobalThemeOverrides>(() =>
   currentThemeConfig.value.themeOverrides || {}
 )
 
-// 纯Naive UI主题切换 - 无需DOM操作
-export const switchTheme = (themeId: string): boolean => {
-  if (!naiveThemeConfigs[themeId]) {
-    console.warn(`Theme '${themeId}' not found`)
+const resolveAppliedThemeId = (selectedThemeId: string): string => {
+  if (selectedThemeId === 'auto') {
+    try {
+      const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches
+      return prefersDark ? 'dark' : 'light'
+    } catch {
+      return 'light'
+    }
+  }
+  return selectedThemeId
+}
+
+const applyThemeId = (selectedThemeId: string): boolean => {
+  const applied = resolveAppliedThemeId(selectedThemeId)
+  if (!naiveThemeConfigs[applied]) {
+    console.warn(`Theme '${applied}' not found`)
     return false
   }
+  currentThemeId.value = applied
 
-  currentThemeId.value = themeId
-  
-  // 仅保存到 localStorage，完全依赖Naive UI的themeOverrides
+  // Keep Tailwind's `dark:` variant in sync with the app theme.
+  // Tailwind in this repo uses `darkMode: 'class'`, so we must toggle `.dark`.
   try {
-    localStorage.setItem('naive-theme-id', themeId)
+    if (typeof document !== 'undefined' && document.documentElement) {
+      const isDark = naiveThemeConfigs[applied]?.naiveTheme === darkTheme
+      document.documentElement.classList.toggle('dark', Boolean(isDark))
+    }
   } catch (error) {
-    console.warn('Failed to save theme preference:', error)
+    // Best-effort only; theme switching must not break if DOM is unavailable.
+    console.warn('[Theme] Failed to sync Tailwind dark class:', error)
   }
-  
-  console.log(`Pure Naive UI theme switched to: ${themeId}`)
   return true
+}
+
+type MediaQueryListCompat = MediaQueryList & {
+  addListener?: (listener: (e: MediaQueryListEvent) => void) => void
+  removeListener?: (listener: (e: MediaQueryListEvent) => void) => void
+}
+
+let __autoColorSchemeWatchInitialized = false
+let __autoColorSchemeQuery: MediaQueryListCompat | null = null
+let __autoColorSchemeListener: ((e: MediaQueryListEvent) => void) | null = null
+
+const cleanupAutoColorSchemeWatch = (): void => {
+  try {
+    const query = __autoColorSchemeQuery
+    const listener = __autoColorSchemeListener
+    if (!query || !listener) return
+
+    if (typeof query.removeEventListener === 'function') {
+      query.removeEventListener('change', listener)
+    } else if (typeof query.removeListener === 'function') {
+      query.removeListener(listener)
+    }
+  } catch (error) {
+    console.warn('[Theme] Failed to cleanup prefers-color-scheme watcher:', error)
+  } finally {
+    __autoColorSchemeQuery = null
+    __autoColorSchemeListener = null
+    __autoColorSchemeWatchInitialized = false
+  }
+}
+
+const ensureAutoColorSchemeWatch = (settings: ReturnType<typeof useGlobalSettings>): void => {
+  // Only relevant when the user-selected theme is 'auto'.
+  if (__autoColorSchemeWatchInitialized) return
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
+
+  try {
+    const query = window.matchMedia('(prefers-color-scheme: dark)') as MediaQueryListCompat
+    const listener = (_e: MediaQueryListEvent) => {
+      if (settings.state.selectedThemeId !== 'auto') return
+      applyThemeId('auto')
+    }
+
+    if (typeof query.addEventListener === 'function') {
+      query.addEventListener('change', listener)
+    } else if (typeof query.addListener === 'function') {
+      query.addListener(listener)
+    }
+
+    // Keep refs so we can clean up on HMR dispose.
+    __autoColorSchemeQuery = query
+    __autoColorSchemeListener = listener
+
+    // Dev-only: avoid accumulating listeners across Vite HMR reloads.
+    if (import.meta.hot) {
+      import.meta.hot.dispose(() => {
+        cleanupAutoColorSchemeWatch()
+      })
+    }
+
+    __autoColorSchemeWatchInitialized = true
+  } catch (error) {
+    console.warn('[Theme] Failed to init prefers-color-scheme watcher:', error)
+  }
+}
+
+// 主题切换（统一由 useGlobalSettings 持久化）
+export const switchTheme = (themeId: string): boolean => {
+  const settings = useGlobalSettings(pinia)
+  settings.updateThemeId(themeId)
+
+  const ok = applyThemeId(themeId)
+  if (ok) {
+    console.log(`Pure Naive UI theme switched to: ${themeId}`)
+  }
+  return ok
 }
 
 // 获取当前主题ID
@@ -779,23 +871,41 @@ export const getThemeConfig = (themeId: string): ThemeConfig | null => {
 
 // 初始化主题系统
 export const initializeNaiveTheme = (): void => {
-  // 从 localStorage 获取保存的主题
-  let savedTheme: string | null = null
+  const settings = useGlobalSettings(pinia)
+
+  // 一次性迁移：localStorage('naive-theme-id') → useGlobalSettings
+  // 只在 global-settings/v1 尚未恢复且当前为默认 'auto' 时执行
   try {
-    savedTheme = localStorage.getItem('naive-theme-id')
+    const legacy = localStorage.getItem('naive-theme-id')
+    if (legacy && settings.state.selectedThemeId === 'auto' && !settings.hasRestored) {
+      settings.updateThemeId(legacy)
+    }
   } catch (error) {
-    console.warn('Failed to load theme preference:', error)
+    console.warn('Failed to load legacy theme preference:', error)
   }
-  
-  // 如果没有保存的主题，使用系统偏好
-  if (!savedTheme) {
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-    savedTheme = prefersDark ? 'dark' : 'light'
+
+  // When in 'auto' mode, keep theme synced with OS color scheme changes.
+  ensureAutoColorSchemeWatch(settings)
+
+  // 监听全局配置的主题选择，驱动实际应用主题
+  // 使用模块级 guard，防止 initializeNaiveTheme 被多次调用时重复注册 watch
+  if (!__themeWatchInitialized) {
+    __themeWatchInitialized = true
+    watch(
+      () => settings.state.selectedThemeId,
+      (selectedId) => {
+        if (!selectedId) return
+        applyThemeId(selectedId)
+      },
+      { immediate: true }
+    )
+  } else {
+    // 已注册 watch：手动应用一次，确保初始化时 theme 与 state 对齐
+    applyThemeId(settings.state.selectedThemeId)
   }
-  
-  // 应用主题
-  switchTheme(savedTheme)
 }
+
+let __themeWatchInitialized = false
 
 // 检查是否为深色主题
 export const isDarkTheme = computed(() => {

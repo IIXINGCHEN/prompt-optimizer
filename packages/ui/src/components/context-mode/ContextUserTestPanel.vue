@@ -1,218 +1,91 @@
 <template>
-    <NFlex vertical :style="{ height: '100%', gap: '12px' }">
-        <!-- 变量值输入表单 -->
-        <NCard
-            :title="t('test.variables.formTitle')"
-            size="small"
-            :bordered="true"
-            :style="{ flexShrink: 0 }"
-        >
-            <template #header-extra>
-                <NSpace :size="8">
-                    <NTag :bordered="false" type="info" size="small">
-                        {{ t("test.variables.tempCount", { count: displayVariables.length }) }}
-                    </NTag>
-                    <NButton
-                        size="small"
-                        quaternary
-                        @click="handleClearAllVariables"
-                    >
-                        {{ t("test.variables.clearAll") }}
-                    </NButton>
-                    <NButton
-                        size="small"
-                        quaternary
-                        @click="emit('open-global-variables')"
-                    >
-                        {{ t("contextMode.actions.globalVariables") }}
-                    </NButton>
-                </NSpace>
-            </template>
+    <NFlex vertical :style="{ height: mode === 'full' ? '100%' : 'auto', gap: '12px' }">
+        <TemporaryVariablesPanel
+            :manager="variableManager"
+            :show-generate-values="true"
+            :is-generating="isGenerating"
+            @generate-values="handleGenerateValues"
+        />
 
-            <NSpace vertical :size="12">
-                <!-- 变量输入项 -->
-                <div
-                    v-for="varName in displayVariables"
-                    :key="varName"
-                    :style="{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                    }"
+        <template v-if="mode === 'full'">
+            <!-- 控制工具栏 -->
+            <NCard :style="{ flexShrink: 0 }" size="small">
+                <TestControlBar
+                    :model-label="t('test.model')"
+                    :model-name="modelName"
+                    :show-compare-toggle="enableCompareMode"
+                    :is-compare-mode="isCompareMode"
+                    @compare-toggle="handleCompareToggle"
+                    :primary-action-text="primaryActionText"
+                    :primary-action-disabled="primaryActionDisabled"
+                    :primary-action-loading="isTestRunning"
+                    :button-size="adaptiveButtonSize"
+                    @primary-action="handleTest"
                 >
-                    <NTag
-                        size="small"
-                        :bordered="false"
-                        :type="
-                            getVariableSource(varName) === 'predefined'
-                                ? 'success'
-                                : getVariableSource(varName) === 'test'
-                                  ? 'warning'
-                                  : 'default'
-                        "
-                        :style="{ minWidth: '120px', flexShrink: 0 }"
-                    >
-                        <span v-text="`{{${varName}}}`"></span>
-                    </NTag>
-                    <NInput
-                        :value="getVariableDisplayValue(varName)"
-                        :placeholder="getVariablePlaceholder(varName)"
-                        size="small"
-                        :style="{ flex: 1 }"
-                        @update:value="
-                            handleVariableValueChange(varName, $event)
-                        "
-                    />
-                    <!-- 删除按钮 (仅临时变量显示) -->
-                    <NButton
-                        v-if="getVariableSource(varName) === 'test'"
-                        size="small"
-                        quaternary
-                        @click="handleDeleteVariable(varName)"
-                        :title="t('test.variables.delete')"
-                    >
-                        🗑️
-                    </NButton>
-                    <!-- 保存到全局按钮 (仅测试变量显示) -->
-                    <NButton
-                        v-if="getVariableSource(varName) === 'test'"
-                        size="small"
-                        quaternary
-                        @click="handleSaveToGlobal(varName)"
-                        :title="t('test.variables.saveToGlobal')"
-                    >
-                        💾
-                    </NButton>
-                </div>
+                    <template #model-select>
+                        <slot name="model-select"></slot>
+                    </template>
+                    <template #secondary-controls>
+                        <slot name="secondary-controls"></slot>
+                    </template>
+                    <template #custom-actions>
+                        <slot name="custom-actions"></slot>
+                    </template>
+                </TestControlBar>
+            </NCard>
 
-                <!-- 无变量提示 -->
-                <NEmpty
-                    v-if="displayVariables.length === 0"
-                    :description="t('test.variables.noVariables')"
-                    size="small"
-                />
-
-                <!-- 操作按钮 -->
-                <NSpace :size="8" justify="end">
-                    <!-- 添加变量按钮 -->
-                    <NButton
-                        size="small"
-                        @click="showAddVariableDialog = true"
-                    >
-                        {{ t("test.variables.addVariable") }}
-                    </NButton>
-                </NSpace>
-            </NSpace>
-        </NCard>
-
-        <!-- 添加变量对话框 -->
-        <NModal
-            v-model:show="showAddVariableDialog"
-            preset="dialog"
-            :title="t('test.variables.addVariable')"
-            :positive-text="t('common.confirm')"
-            :negative-text="t('common.cancel')"
-            :on-positive-click="handleAddVariable"
-            :mask-closable="false"
-        >
-            <NSpace vertical :size="12" style="margin-top: 16px;">
-                <NFormItem
-                    :label="t('variableExtraction.variableName')"
-                    :validation-status="
-                        newVariableNameError ? 'error' : undefined
-                    "
-                    :feedback="newVariableNameError"
-                >
-                    <NInput
-                        v-model:value="newVariableName"
-                        :placeholder="
-                            t('variableExtraction.variableNamePlaceholder')
-                        "
-                        @input="validateNewVariableName"
-                    />
-                </NFormItem>
-
-                <NFormItem :label="t('variableExtraction.variableValue')">
-                    <NInput
-                        v-model:value="newVariableValue"
-                        :placeholder="
-                            t('variableExtraction.variableValuePlaceholder')
-                        "
-                    />
-                </NFormItem>
-            </NSpace>
-        </NModal>
-
-        <!-- 控制工具栏 -->
-        <NCard :style="{ flexShrink: 0 }" size="small">
-            <TestControlBar
-                :model-label="t('test.model')"
-                :model-name="modelName"
-                :show-compare-toggle="enableCompareMode"
+            <!-- 测试结果区域（不支持工具调用，仅显示文本结果）-->
+            <TestResultSection
                 :is-compare-mode="isCompareMode"
-                @compare-toggle="handleCompareToggle"
-                :primary-action-text="primaryActionText"
-                :primary-action-disabled="primaryActionDisabled"
-                :primary-action-loading="isTestRunning"
-                :button-size="adaptiveButtonSize"
-                @primary-action="handleTest"
+                :vertical-layout="adaptiveResultVerticalLayout"
+                :show-original="isCompareMode"
+                :original-result-title="t('test.originalResult')"
+                :optimized-result-title="t('test.optimizedResult')"
+                :single-result-title="singleResultTitle"
+                :size="adaptiveButtonSize"
+                :style="{ flex: 1, minHeight: 0 }"
+                :show-evaluation="showEvaluation"
+                :has-original-result="hasOriginalResult"
+                :has-optimized-result="hasOptimizedResult"
+                :is-evaluating-original="isEvaluatingOriginal"
+                :is-evaluating-optimized="isEvaluatingOptimized"
+                :original-score="originalScore"
+                :optimized-score="optimizedScore"
+                :has-original-evaluation="hasOriginalEvaluation"
+                :has-optimized-evaluation="hasOptimizedEvaluation"
+                :original-evaluation-result="originalEvaluationResult"
+                :optimized-evaluation-result="optimizedEvaluationResult"
+                :original-score-level="originalScoreLevel"
+                :optimized-score-level="optimizedScoreLevel"
+                @evaluate-original="emit('evaluate-original')"
+                @evaluate-optimized="emit('evaluate-optimized')"
+                @show-original-detail="emit('show-original-detail')"
+                @show-optimized-detail="emit('show-optimized-detail')"
+                @apply-improvement="emit('apply-improvement', $event)"
             >
-                <template #model-select>
-                    <slot name="model-select"></slot>
+                <!-- 对比模式：原始结果 -->
+                <template #original-result>
+                    <slot name="original-result"></slot>
                 </template>
-                <template #secondary-controls>
-                    <slot name="secondary-controls"></slot>
+
+                <!-- 对比模式：优化结果 -->
+                <template #optimized-result>
+                    <slot name="optimized-result"></slot>
                 </template>
-                <template #custom-actions>
-                    <slot name="custom-actions"></slot>
+
+                <!-- 单一结果模式 -->
+                <template #single-result>
+                    <slot name="single-result"></slot>
                 </template>
-            </TestControlBar>
-        </NCard>
+            </TestResultSection>
+        </template>
 
-        <!-- 测试结果区域（不支持工具调用，仅显示文本结果）-->
-        <TestResultSection
-            :is-compare-mode="isCompareMode"
-            :vertical-layout="adaptiveResultVerticalLayout"
-            :show-original="isCompareMode"
-            :original-result-title="t('test.originalResult')"
-            :optimized-result-title="t('test.optimizedResult')"
-            :single-result-title="singleResultTitle"
-            :size="adaptiveButtonSize"
-            :style="{ flex: 1, minHeight: 0 }"
-            :show-evaluation="showEvaluation"
-            :has-original-result="hasOriginalResult"
-            :has-optimized-result="hasOptimizedResult"
-            :is-evaluating-original="isEvaluatingOriginal"
-            :is-evaluating-optimized="isEvaluatingOptimized"
-            :original-score="originalScore"
-            :optimized-score="optimizedScore"
-            :has-original-evaluation="hasOriginalEvaluation"
-            :has-optimized-evaluation="hasOptimizedEvaluation"
-            :original-evaluation-result="originalEvaluationResult"
-            :optimized-evaluation-result="optimizedEvaluationResult"
-            :original-score-level="originalScoreLevel"
-            :optimized-score-level="optimizedScoreLevel"
-            @evaluate-original="emit('evaluate-original')"
-            @evaluate-optimized="emit('evaluate-optimized')"
-            @show-original-detail="emit('show-original-detail')"
-            @show-optimized-detail="emit('show-optimized-detail')"
-            @apply-improvement="emit('apply-improvement', $event)"
-        >
-            <!-- 对比模式：原始结果 -->
-            <template #original-result>
-                <slot name="original-result"></slot>
-            </template>
-
-            <!-- 对比模式：优化结果 -->
-            <template #optimized-result>
-                <slot name="optimized-result"></slot>
-            </template>
-
-            <!-- 单一结果模式 -->
-            <template #single-result>
-                <slot name="single-result"></slot>
-            </template>
-        </TestResultSection>
+        <!-- 变量值预览对话框 -->
+        <VariableValuePreviewDialog
+            v-model:show="showPreviewDialog"
+            :result="generationResult"
+            @confirm="confirmBatchApply"
+        />
     </NFlex>
 </template>
 
@@ -223,22 +96,19 @@ import { useI18n } from "vue-i18n";
 import {
     NFlex,
     NCard,
-    NButton,
-    NTag,
-    NSpace,
-    NInput,
-    NEmpty,
-    NModal,
-    NFormItem,
 } from "naive-ui";
 import { useResponsive } from '../../composables/ui/useResponsive';
 import { usePerformanceMonitor } from "../../composables/performance/usePerformanceMonitor";
 import { useDebounceThrottle } from "../../composables/performance/useDebounceThrottle";
 import { useTestVariableManager } from "../../composables/variable/useTestVariableManager";
+import { useSmartVariableValueGeneration } from "../../composables/variable/useSmartVariableValueGeneration";
 import TestControlBar from "../TestControlBar.vue";
 import TestResultSection from "../TestResultSection.vue";
+import TemporaryVariablesPanel from "../variable/TemporaryVariablesPanel.vue";
+import VariableValuePreviewDialog from "../variable/VariableValuePreviewDialog.vue";
 import type { EvaluationResponse, EvaluationType } from '@prompt-optimizer/core';
 import type { ScoreLevel } from '../../composables/prompt/useEvaluation';
+import type { AppServices } from '../../types/services';
 
 const { t } = useI18n();
 
@@ -255,7 +125,16 @@ const {
 } = useResponsive();
 
 interface Props {
-    // 优化后的提示词（用于检测变量）
+    /**
+     * 渲染模式：
+     * - full: 变量表单 + 测试控制栏 + 结果区（历史行为）
+     * - variables-only: 仅变量表单（供 Workspace 自行渲染多列 variants 测试区）
+     */
+    mode?: "full" | "variables-only";
+
+    // 原始提示词（fallback，当optimizedPrompt为空时使用）
+    prompt?: string;
+    // 优化后的提示词（优先使用）
     optimizedPrompt?: string;
 
     // 测试状态
@@ -265,11 +144,16 @@ interface Props {
 
     // 模型信息（用于显示标签）
     modelName?: string;
+    // 🆕 评估模型（用于变量提取和变量值生成）
+    evaluationModelKey?: string;
 
     // 变量管理（三层）
     globalVariables?: Record<string, string>;
     predefinedVariables?: Record<string, string>;
     temporaryVariables?: Record<string, string>;
+
+    // 🆕 应用服务
+    services?: AppServices | null;
 
     // 布局配置
     buttonSize?: "small" | "medium" | "large";
@@ -300,6 +184,8 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+    mode: "full",
+    prompt: "",
     optimizedPrompt: "",
     isTestRunning: false,
     isCompareMode: false,
@@ -307,9 +193,11 @@ const props = withDefaults(defineProps<Props>(), {
     buttonSize: "medium",
     resultVerticalLayout: false,
     singleResultTitle: "",
+    evaluationModelKey: "",
     globalVariables: () => ({}),
     predefinedVariables: () => ({}),
     temporaryVariables: () => ({}),
+    services: null,
     // 评估默认值
     showEvaluation: false,
     hasOriginalResult: false,
@@ -331,7 +219,6 @@ const emit = defineEmits<{
     test: [testVariables: Record<string, string>];
     "compare-toggle": [];
     "open-variable-manager": [];
-    "open-global-variables": [];
     "variable-change": [name: string, value: string];
     "save-to-global": [name: string, value: string];
     "temporary-variable-remove": [name: string];
@@ -411,23 +298,33 @@ const variableManager = useTestVariableManager({
 });
 
 const {
-    showAddVariableDialog,
-    newVariableName,
-    newVariableValue,
-    newVariableNameError,
     sortedVariables: displayVariables,
     getVariableSource,
     getVariableDisplayValue,
-    getVariablePlaceholder,
-    validateNewVariableName,
     handleVariableValueChange,
-    handleAddVariable,
-    handleDeleteVariable,
-    handleClearAllVariables,
-    handleSaveToGlobal,
     getVariableValues,
     setVariableValues,
 } = variableManager;
+
+// ========== 变量值生成 ==========
+
+const {
+    isGenerating,
+    generationResult,
+    showPreviewDialog,
+    handleGenerateValues,
+    confirmBatchApply,
+} = useSmartVariableValueGeneration({
+    services: toRef(props, 'services'),
+    promptContent: computed(() => props.optimizedPrompt || props.prompt),
+    variableNames: displayVariables,
+    getVariableValue: (name: string) => getVariableDisplayValue(name),
+    getVariableSource: (name: string) => getVariableSource(name),
+    applyValue: (name: string, value: string) => {
+        handleVariableValueChange(name, value)
+    },
+    evaluationModelKey: computed(() => props.evaluationModelKey || ''),
+})
 
 // 开发环境下的性能调试
 if (import.meta.env.DEV) {
@@ -459,12 +356,8 @@ defineExpose({
     setVariableValues,
 
     // 预览功能占位符（兼容接口）
-    showPreview: () => {
-        console.warn('[ContextUserTestPanel] showPreview not implemented');
-    },
-    hidePreview: () => {
-        console.warn('[ContextUserTestPanel] hidePreview not implemented');
-    },
+    showPreview: () => {},
+    hidePreview: () => {},
 });
 </script>
 

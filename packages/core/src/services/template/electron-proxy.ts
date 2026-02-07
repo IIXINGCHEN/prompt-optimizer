@@ -1,6 +1,7 @@
-import type { Template, ITemplateManager } from './types';
+import type { Template, ITemplateManager, TemplateType } from './types';
 import type { BuiltinTemplateLanguage } from './languageService';
 import { safeSerializeForIPC } from '../../utils/ipc-serialization';
+import { TemplateStorageError } from './errors';
 
 // 为window.electronAPI提供完整的类型定义，以确保类型安全
 interface ElectronAPI {
@@ -11,7 +12,7 @@ interface ElectronAPI {
     getTemplates: () => Promise<Template[]>;
     exportTemplate: (id: string) => Promise<string>;
     importTemplate: (jsonString: string) => Promise<void>;
-    listTemplatesByType: (type: 'optimize' | 'userOptimize' | 'text2imageOptimize' | 'image2imageOptimize' | 'imageIterate' | 'iterate' | 'contextUserOptimize' | 'contextIterate' | 'conversationMessageOptimize') => Promise<Template[]>;
+    listTemplatesByType: (type: TemplateType) => Promise<Template[]>;
     changeBuiltinTemplateLanguage: (language: BuiltinTemplateLanguage) => Promise<void>;
     getCurrentBuiltinTemplateLanguage: () => Promise<BuiltinTemplateLanguage>;
     getSupportedBuiltinTemplateLanguages: () => Promise<BuiltinTemplateLanguage[]>;
@@ -39,7 +40,9 @@ export class ElectronTemplateManagerProxy implements ITemplateManager {
 
   constructor() {
     if (!window.electronAPI?.template) {
-      throw new Error('Electron API for TemplateManager not available. Please ensure preload script is loaded.');
+      throw new TemplateStorageError(
+        'Electron API for TemplateManager not available. Please ensure preload script is loaded.',
+      );
     }
     this.electronAPI = window.electronAPI.template;
   }
@@ -71,7 +74,7 @@ export class ElectronTemplateManagerProxy implements ITemplateManager {
     return this.electronAPI.importTemplate(jsonString);
   }
 
-  async listTemplatesByType(type: 'optimize' | 'userOptimize' | 'text2imageOptimize' | 'image2imageOptimize' | 'imageIterate' | 'iterate' | 'contextUserOptimize' | 'contextIterate' | 'conversationMessageOptimize'): Promise<Template[]> {
+  async listTemplatesByType(type: TemplateType): Promise<Template[]> {
     return this.electronAPI.listTemplatesByType(type);
   }
 

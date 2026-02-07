@@ -51,6 +51,7 @@
                         :size="buttonSize"
                         type="primary"
                         :loading="loading"
+                        data-testid="pro-multi-open-context-editor"
                     >
                         <template #icon>
                             <svg
@@ -97,15 +98,16 @@
                     </svg>
                 </template>
                 <template #extra>
-                    <NButton
-                        v-if="canEditMessages"
-                        @click="handleAddMessage"
-                        :size="buttonSize"
-                        type="primary"
-                        dashed
-                    >
-                        {{ t("conversation.addFirst") }}
-                    </NButton>
+                        <NButton
+                            v-if="canEditMessages"
+                            @click="handleAddMessage"
+                            :size="buttonSize"
+                            type="primary"
+                            dashed
+                            data-testid="pro-multi-add-first-message"
+                        >
+                            {{ t("conversation.addFirst") }}
+                        </NButton>
                 </template>
             </NEmpty>
 
@@ -117,16 +119,18 @@
                         :key="`message-${index}`"
                         style="padding: 0"
                     >
-                        <NCard
-                            :size="cardSize"
-                            embedded
-                            :bordered="false"
-                            content-style="padding: 0;"
-                            :class="{
-                                'message-card': true,
-                                'message-card-selected': enableMessageOptimization && message.id === selectedMessageId,
-                            }"
-                        >
+                            <NCard
+                                :size="cardSize"
+                                embedded
+                                :bordered="false"
+                                content-style="padding: 0;"
+                                :data-testid="`pro-multi-message-card-${index}`"
+                                :data-message-id="message.id"
+                                :class="{
+                                    'message-card': true,
+                                    'message-card-selected': enableMessageOptimization && message.id === selectedMessageId,
+                                }"
+                            >
                             <div class="cm-row">
                                 <!-- 角色标签（小号，单行布局） -->
                                 <NSpace align="center" :size="4" class="left">
@@ -169,7 +173,7 @@
                                         :autosize="{ minRows: 1, maxRows: 10 }"
                                         :existing-global-variables="Object.keys(props.availableVariables || {})"
                                         :existing-temporary-variables="Object.keys(props.temporaryVariables || {})"
-                                        :predefined-variables="PREDEFINED_VARIABLES"
+                                        :predefined-variables="[...PREDEFINED_VARIABLES]"
                                         :global-variable-values="props.availableVariables || {}"
                                         :temporary-variable-values="props.temporaryVariables || {}"
                                         :predefined-variable-values="{}"
@@ -195,6 +199,7 @@
                                         quaternary
                                         circle
                                         :title="message.id === selectedMessageId ? t('conversation.selected') : t('conversation.selectForOptimization')"
+                                        :data-testid="`pro-multi-select-message-${index}`"
                                     >
                                         <template #icon>
                                             <svg
@@ -317,6 +322,7 @@
                                 dashed
                                 type="primary"
                                 block
+                                data-testid="pro-multi-add-message"
                             >
                                 <template #icon>
                                     <svg
@@ -368,7 +374,6 @@ import { VariableAwareInput } from "../variable-extraction";
 import { PREDEFINED_VARIABLES } from "../../types/variable";
 import type {
     ConversationManagerProps,
-    ConversationManagerEvents,
 } from "../../types/components";
 import type { ConversationMessage } from "@prompt-optimizer/core";
 
@@ -405,7 +410,17 @@ const props = withDefaults(defineProps<ConversationManagerProps>(), {
     enableToolManagement: true,
 });
 
-const emit = defineEmits<ConversationManagerEvents>();
+const emit = defineEmits<{
+    (e: "update:messages", messages: ConversationMessage[]): void;
+    (e: "messageChange", index: number, message: ConversationMessage, action: "add" | "update" | "delete"): void;
+    (e: "messageReorder", fromIndex: number, toIndex: number): void;
+    (e: "openContextEditor", messages: ConversationMessage[], variables: Record<string, string>): void;
+    (e: "open-tool-manager"): void;
+    (e: "variable-extracted", data: { variableName: string; variableValue: string; variableType: "global" | "temporary" }): void;
+    (e: "add-missing-variable", name: string): void;
+    (e: "messageSelect", message: ConversationMessage): void;
+    (e: "ready"): void;
+}>();
 
 // 状态管理 - 使用 shallowRef 优化大数据渲染
 const loading = ref(false);

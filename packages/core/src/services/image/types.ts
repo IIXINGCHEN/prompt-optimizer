@@ -71,8 +71,7 @@ export interface ImageModelConfig {
 // === 基础类型（请求/结果/进度） ===
 
 export interface ImageInputRef {
-  b64?: string
-  url?: string
+  b64: string
   mimeType?: string
 }
 
@@ -83,6 +82,18 @@ export interface ImageRequest {
   count?: number                           // 生成数量，默认 1
   paramOverrides?: Record<string, unknown> // 临时参数覆盖，不影响保存的配置
 }
+
+// === 显式模式请求类型（避免用 inputImage 的存在与否隐式推断） ===
+
+/**
+ * 文生图请求：不允许携带 inputImage。
+ */
+export type Text2ImageRequest = Omit<ImageRequest, 'inputImage'> & { inputImage?: never }
+
+/**
+ * 图生图请求：必须提供 inputImage。
+ */
+export type Image2ImageRequest = Omit<ImageRequest, 'inputImage'> & { inputImage: ImageInputRef }
 
 export interface ImageResultItem {
   b64?: string
@@ -174,15 +185,127 @@ export interface IImageAdapterRegistry {
 // === 服务接口 ===
 
 export interface IImageService {
-  // 核心生成功能
+  // 核心生成功能（兼容入口：内部仍可能根据 inputImage 判定模式）
   generate(request: ImageRequest): Promise<ImageResult>
 
-  // 辅助功能
+  // 显式模式入口：避免模式误判与错误信息混淆
+  generateText2Image(request: Text2ImageRequest): Promise<ImageResult>
+  generateImage2Image(request: Image2ImageRequest): Promise<ImageResult>
+
+  // 辅助功能（兼容入口）
   validateRequest(request: ImageRequest): Promise<void>
+
+  // 显式校验：用于 UI/调用方提前发现配置与输入不匹配
+  validateText2ImageRequest(request: Text2ImageRequest): Promise<void>
+  validateImage2ImageRequest(request: Image2ImageRequest): Promise<void>
+
   // 新增：连接测试（直接使用临时配置，不依赖已保存的配置）
   testConnection(config: ImageModelConfig): Promise<ImageResult>
   // 新增：获取动态模型列表（如支持）
   getDynamicModels(providerId: string, connectionConfig: Record<string, any>): Promise<ImageModel[]>
+}
+
+
+// === 图像存储类型（分离存储支持）===
+
+/**
+ * 图像元数据（轻量级，不含实际图像数据）
+ */
+export interface ImageMetadata {
+  id: string                    // 唯一标识，格式：img_<timestamp>_<uuid>
+  width?: number               // 图像宽度（可选）
+  height?: number              // 图像高度（可选）
+  mimeType: string             // MIME类型：image/png, image/jpeg
+  sizeBytes: number            // 图像大小（字节）
+  createdAt: number            // 创建时间戳
+  accessedAt: number           // 最后访问时间戳（用于LRU）
+  source: 'generated' | 'uploaded'  // 来源：生成 vs 上传
+  metadata?: {                 // 关联的生成元数据
+    prompt?: string            // 生成提示词
+    modelId?: string           // 使用的模型
+    configId?: string          // 使用的配置
+  }
+}
+
+/**
+ * 图像引用（用于 Session 存储）
+ * 当 Session 持久化时，使用此类型替代完整的图像数据
+ */
+export interface ImageRef {
+  id: string                   // 图像ID
+  _type: 'image-ref'          // 类型标记，用于区分引用和实际数据
+  b64?: never                 // 明确排除 base64 字段
+  url?: never                 // 明确排除 URL 字段
+  mimeType?: never            // 明确排除 mimeType 字段
+}
+
+/**
+ * 完整图像数据（仅在需要时加载）
+ * 包含元数据和实际的 base64 图像数据
+ */
+export interface FullImageData {
+  metadata: ImageMetadata
+  data: string                 // base64编码的图像数据（不含data URL前缀）
+}
+
+/**
+ * 图像存储配置
+ */
+export interface ImageStorageConfig {
+  maxCacheSize?: number        // 最大缓存大小（字节），默认 50MB
+  maxAge?: number              // 最大保留时间（毫秒），默认 7天
+  maxCount?: number            // 最大图像数量，默认 100张
+  autoCleanupThreshold?: number  // 自动清理阈值（达到此比例时触发），默认 0.8
+}
+
+/**
+ * 图像存储服务接口
+ * 提供图像的独立存储、查询和清理功能
+ */
+export interface IImageStorageService {
+  // 基础 CRUD 操作
+  saveImage(data: FullImageData): Promise<string>  // 返回图像ID
+  getImage(id: string): Promise<FullImageData | null>
+  getMetadata(id: string): Promise<ImageMetadata | null>
+  deleteImage(id: string): Promise<void>
+
+  // 批量操作
+  deleteImages(ids: string[]): Promise<void>
+  clearAll(): Promise<void>
+
+  // 清理策略
+  cleanupOldImages(): Promise<number>  // 返回清理的图像数量
+  enforceQuota(): Promise<void>        // 强制执行配额限制
+
+  // 查询和统计
+  listAllMetadata(): Promise<ImageMetadata[]>
+  getStorageStats(): Promise<{
+    count: number
+    totalBytes: number
+    oldestAt: number | null
+    newestAt: number | null
+  }>
+
+  // 配置管理
+  getConfig(): ImageStorageConfig
+  updateConfig(config: Partial<ImageStorageConfig>): Promise<void>
+
+  // 生命周期管理
+  close(): Promise<void>
+}
+
+/**
+ * 辅助函数：判断是否为图像引用
+ */
+export function isImageRef(item: ImageResultItem): item is ImageRef {
+  return '_type' in item && item._type === 'image-ref'
+}
+
+/**
+ * 辅助函数：创建图像引用
+ */
+export function createImageRef(id: string): ImageRef {
+  return { id, _type: 'image-ref' }
 }
 
 // 导出抽象基类

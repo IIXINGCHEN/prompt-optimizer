@@ -11,6 +11,7 @@
                 :mode="adaptiveInputMode"
                 :size="inputSize"
                 :enable-fullscreen="enableFullscreen"
+                :test-id="props.testIdPrefix ? `${props.testIdPrefix}-test-input` : undefined"
             />
         </NCard>
 
@@ -25,6 +26,8 @@
                 :primary-action-disabled="primaryActionDisabled"
                 :primary-action-loading="isTestRunning"
                 :button-size="adaptiveButtonSize"
+                :compare-toggle-test-id="props.testIdPrefix ? `${props.testIdPrefix}-test-compare-toggle` : undefined"
+                :primary-action-test-id="props.testIdPrefix ? `${props.testIdPrefix}-test-run` : undefined"
                 @compare-toggle="handleCompareToggle"
                 @primary-action="handleTest"
             >
@@ -140,11 +143,12 @@ import type {
     OptimizationMode,
     AdvancedTestResult,
     ToolCallResult,
+    ConversationMessage,
     EvaluationResponse,
     EvaluationType,
     PatchOperation,
 } from "@prompt-optimizer/core";
-import type { ScoreLevel } from './evaluation/EvaluationScoreBadge.vue';
+import type { ScoreLevel } from './evaluation/types';
 import { useResponsive } from '../composables/ui/useResponsive';
 import { usePerformanceMonitor } from "../composables/performance/usePerformanceMonitor";
 import { useDebounceThrottle } from "../composables/performance/useDebounceThrottle";
@@ -223,6 +227,9 @@ interface Props {
     optimizedEvaluationResult?: EvaluationResponse | null;
     originalScoreLevel?: ScoreLevel | null;
     optimizedScoreLevel?: ScoreLevel | null;
+
+    /** E2E: stable selector prefix, e.g. "basic-system" */
+    testIdPrefix?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -252,6 +259,7 @@ const props = withDefaults(defineProps<Props>(), {
     optimizedEvaluationResult: null,
     originalScoreLevel: null,
     optimizedScoreLevel: null,
+    testIdPrefix: undefined,
 });
 
 const emit = defineEmits<{
@@ -342,8 +350,8 @@ const adaptiveInputMode = computed(() => {
     return props.inputMode || "normal";
 });
 
-const adaptiveButtonSize = computed(() => {
-    return buttonSize.value;
+const adaptiveButtonSize = computed<"small" | "medium" | "large">(() => {
+    return props.buttonSize || buttonSize.value;
 });
 
 const adaptiveResultVerticalLayout = computed(() => {

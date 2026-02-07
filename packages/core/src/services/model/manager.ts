@@ -7,6 +7,7 @@ import { validateOverrides } from './parameter-utils';
 import { ElectronConfigManager, isElectronRenderer } from './electron-config';
 import { CORE_SERVICE_KEYS } from '../../constants/storage-keys';
 import { ImportExportError } from '../../interfaces/import-export';
+import { IMPORT_EXPORT_ERROR_CODES } from '../../constants/error-codes';
 import {
   convertLegacyToTextModelConfig,
   convertLegacyToTextModelConfigWithRegistry,
@@ -237,6 +238,60 @@ export class ModelManager implements IModelManager {
   }
 
   /**
+   * 旧存储数据里 providerMeta 可能缺少新字段；用当前 adapter 的 provider 元数据补齐。
+   *
+   * 目前主要用于回填 `corsRestricted`，以便 UI 能正确展示 CORS 受限标签。
+   */
+  private patchProviderMeta(config: TextModelConfig): TextModelConfig {
+    const providerMeta = config.providerMeta
+    if (!providerMeta) {
+      return config
+    }
+
+    const providerId = (providerMeta.id || config.modelMeta?.providerId || '').toLowerCase()
+
+    // Historical metadata might incorrectly mark Ollama as CORS-restricted.
+    // Ollama can be configured (CORS/reverse-proxy), so we force-disable the tag.
+    if (providerId === 'ollama') {
+      if (providerMeta.corsRestricted === false) {
+        return config
+      }
+      return {
+        ...config,
+        providerMeta: {
+          ...providerMeta,
+          corsRestricted: false
+        }
+      }
+    }
+
+    if (providerMeta.corsRestricted !== undefined) {
+      return config
+    }
+
+    try {
+      if (!providerId || !this.registry) {
+        return config
+      }
+
+      const latestProvider = this.registry.getAdapter(providerId).getProvider()
+      if (latestProvider.corsRestricted === undefined) {
+        return config
+      }
+
+      return {
+        ...config,
+        providerMeta: {
+          ...providerMeta,
+          corsRestricted: latestProvider.corsRestricted
+        }
+      }
+    } catch {
+      return config
+    }
+  }
+
+  /**
    * 从存储获取模型配置，如果不存在则返回默认配置
    * 返回any类型以兼容新旧格式
    */
@@ -259,8 +314,8 @@ export class ModelManager implements IModelManager {
     await this.ensureInitialized();
     const models = await this.getModelsFromStorage();
 
-    // 转换为 TextModelConfig 数组
-    return Object.entries(models).map(([key, config]) => {
+    // 转换为 TextModelConfig 数组（先完成格式/字段迁移）
+    const migratedConfigs = Object.entries(models).map(([key, config]) => {
       let textConfig: TextModelConfig
 
       // 检查是否已经是新格式
@@ -279,6 +334,21 @@ export class ModelManager implements IModelManager {
       // 读时迁移：合并 customParamOverrides 到 paramOverrides
       return this.migrateConfig(textConfig)
     });
+
+    const needsProviderMetaPatch = migratedConfigs.some(
+      (cfg) => cfg.providerMeta && cfg.providerMeta.corsRestricted === undefined
+    )
+
+    if (needsProviderMetaPatch) {
+      // Best-effort: ensure registry is available for patching provider metadata.
+      try {
+        await this.getRegistry()
+      } catch {
+        // ignore - registry is only used for optional metadata patching
+      }
+    }
+
+    return migratedConfigs.map((cfg) => this.patchProviderMeta(cfg))
   }
 
   /**
@@ -309,7 +379,20 @@ export class ModelManager implements IModelManager {
     }
 
     // 读时迁移：合并 customParamOverrides 到 paramOverrides
-    return this.migrateConfig(textConfig)
+    const migrated = this.migrateConfig(textConfig)
+    const needsProviderMetaPatch =
+      !!migrated.providerMeta && migrated.providerMeta.corsRestricted === undefined
+
+    if (needsProviderMetaPatch) {
+      // Best-effort: ensure registry is available for patching provider metadata.
+      try {
+        await this.getRegistry()
+      } catch {
+        // ignore - registry is only used for optional metadata patching
+      }
+    }
+
+    return this.patchProviderMeta(migrated)
   }
 
   /**
@@ -636,7 +719,8 @@ export class ModelManager implements IModelManager {
       throw new ImportExportError(
         'Failed to export model data',
         await this.getDataType(),
-        error as Error
+        error as Error,
+        IMPORT_EXPORT_ERROR_CODES.EXPORT_FAILED,
       );
     }
   }
@@ -647,7 +731,12 @@ export class ModelManager implements IModelManager {
   async importData(data: any): Promise<void> {
     // 基本格式验证：必须是数组
     if (!Array.isArray(data)) {
-      throw new Error('Invalid model data format: data must be an array of model configurations');
+      throw new ImportExportError(
+        'Invalid model data format: data must be an array of model configurations',
+        await this.getDataType(),
+        undefined,
+        IMPORT_EXPORT_ERROR_CODES.VALIDATION_ERROR,
+      );
     }
 
     const models = data as Array<TextModelConfig | (ModelConfig & { key: string })>;

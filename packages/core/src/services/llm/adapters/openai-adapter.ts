@@ -1,5 +1,6 @@
 import OpenAI from 'openai'
 import { AbstractTextProviderAdapter } from './abstract-adapter'
+import { APIError } from '../errors'
 import type {
   TextProvider,
   TextModel,
@@ -121,7 +122,6 @@ export class OpenAIAdapter extends AbstractTextProviderAdapter {
 
     try {
       const response = await openai.models.list()
-      console.log('[OpenAIAdapter] API returned models:', response)
 
       // 检查返回格式
       if (response && response.data && Array.isArray(response.data)) {
@@ -133,13 +133,13 @@ export class OpenAIAdapter extends AbstractTextProviderAdapter {
           .sort((a, b) => a.id.localeCompare(b.id))
 
         if (models.length === 0) {
-          throw new Error('EMPTY_MODEL_LIST: API returned empty model list')
+          throw new APIError('API returned empty model list')
         }
 
         return models
       }
 
-      throw new Error('INVALID_RESPONSE: Unexpected API response format')
+      throw new APIError('Unexpected API response format')
     } catch (error: any) {
       console.error('[OpenAIAdapter] Failed to fetch models:', error)
 
@@ -149,19 +149,19 @@ export class OpenAIAdapter extends AbstractTextProviderAdapter {
         const isCrossOriginError = this.detectCrossOriginError(error, baseURL)
 
         if (isCrossOriginError) {
-          throw new Error(`CROSS_ORIGIN_CONNECTION_FAILED: ${error.message}`)
+          throw new APIError(`Cross-origin connection failed: ${error.message}`)
         } else {
-          throw new Error(`CONNECTION_FAILED: ${error.message}`)
+          throw new APIError(`Connection failed: ${error.message}`)
         }
       }
 
       // API返回的错误信息
       if (error.response?.data) {
-        throw new Error(`API_ERROR: ${JSON.stringify(error.response.data)}`)
+        throw new APIError(`API error: ${JSON.stringify(error.response.data)}`)
       }
 
       // 其他错误,保持原始信息
-      throw new Error(`UNKNOWN_ERROR: ${error.message || 'Unknown error'}`)
+      throw new APIError(error.message || 'Unknown error')
     }
   }
 
@@ -404,7 +404,9 @@ export class OpenAIAdapter extends AbstractTextProviderAdapter {
    * @param isStream 是否为流式请求
    * @returns OpenAI SDK实例
    */
-  private createOpenAIInstance(config: TextModelConfig, isStream: boolean = false): OpenAI {
+  // NOTE: protected so OpenAI-compatible providers (e.g. Ollama) can tweak auth/baseURL
+  // without re-implementing the whole chat/stream/tool plumbing.
+  protected createOpenAIInstance(config: TextModelConfig, isStream: boolean = false): OpenAI {
     const apiKey = config.connectionConfig.apiKey || ''
 
     const processedBaseURL = this.normalizeBaseURL(
@@ -485,12 +487,12 @@ export class OpenAIAdapter extends AbstractTextProviderAdapter {
 
       // 处理响应中的 reasoning_content 和普通 content
       if (!response.choices || response.choices.length === 0) {
-        throw new Error('API returned invalid response: choices is empty or missing')
+        throw new APIError('API returned invalid response: choices is empty or missing')
       }
 
       const choice = response.choices[0]
       if (!choice?.message) {
-        throw new Error('No valid response received')
+        throw new APIError('No valid response received')
       }
 
       let content = choice.message.content || ''
@@ -601,7 +603,7 @@ export class OpenAIAdapter extends AbstractTextProviderAdapter {
         // JSON 解析失败，继续抛出错误
       }
       // SSE 和 JSON 解析都失败，抛出明确错误
-      throw new Error(
+      throw new APIError(
         `SSE response parsing failed: unable to extract any content from response. First 200 chars: ${sseString.slice(0, 200)}`
       )
     }
@@ -706,7 +708,6 @@ export class OpenAIAdapter extends AbstractTextProviderAdapter {
         content: msg.content
       }))
 
-      console.log('[OpenAIAdapter] Creating stream request...')
       const {
         timeout, // 已在createOpenAIInstance中处理
         model: _paramModel, // 避免覆盖主model
@@ -724,8 +725,6 @@ export class OpenAIAdapter extends AbstractTextProviderAdapter {
 
       // 直接使用流式响应
       const stream = await openai.chat.completions.create(completionConfig)
-
-      console.log('[OpenAIAdapter] Stream response received')
 
       // 累积内容
       let accumulatedReasoning = ''
@@ -755,8 +754,6 @@ export class OpenAIAdapter extends AbstractTextProviderAdapter {
           this.processStreamContentWithThinkTags(content, callbacks, thinkState)
         }
       }
-
-      console.log('[OpenAIAdapter] Stream completed')
 
       // 构建完整响应
       const response: LLMResponse = {
@@ -800,7 +797,6 @@ export class OpenAIAdapter extends AbstractTextProviderAdapter {
         content: msg.content
       }))
 
-      console.log('[OpenAIAdapter] Creating stream request with tools...')
       const {
         timeout,
         model: _paramModel,
@@ -820,7 +816,6 @@ export class OpenAIAdapter extends AbstractTextProviderAdapter {
       }
 
       const stream = await openai.chat.completions.create(completionConfig)
-      console.log('[OpenAIAdapter] Stream response with tools received')
 
       let accumulatedReasoning = ''
       let accumulatedContent = ''
@@ -889,8 +884,6 @@ export class OpenAIAdapter extends AbstractTextProviderAdapter {
         }
       }
 
-      console.log('[OpenAIAdapter] Stream with tools completed, tool calls:', toolCalls.length)
-
       const response: LLMResponse = {
         content: accumulatedContent,
         reasoning: accumulatedReasoning || undefined,
@@ -906,4 +899,3 @@ export class OpenAIAdapter extends AbstractTextProviderAdapter {
     }
   }
 }
-

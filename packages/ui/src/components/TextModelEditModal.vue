@@ -11,14 +11,6 @@
   >
     <form v-if="formReady" @submit.prevent="handleSubmit">
         <NForm label-placement="left" label-width="auto" size="small">
-          <NFormItem v-if="!isEditing" :label="t('modelManager.modelKey')">
-            <NInput
-              v-model:value="form.id"
-              :placeholder="t('modelManager.modelKeyPlaceholder')"
-              required
-            />
-          </NFormItem>
-
           <NFormItem :label="t('modelManager.displayName')">
             <NInput
               v-model:value="form.name"
@@ -170,7 +162,7 @@
       <NSpace justify="space-between" align="center" style="width: 100%;">
         <NSpace align="center">
           <NButton
-            @click="testFormConnection"
+            @click="handleTestFormConnection"
             :loading="isTestingFormConnection"
             :disabled="!canTestFormConnection"
             secondary
@@ -202,9 +194,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, nextTick } from 'vue'
+import { computed, inject, nextTick, h } from 'vue'
 
 import { useI18n } from 'vue-i18n'
+import { useToast } from '../composables/ui/useToast'
+import { isRunningInElectron } from '@prompt-optimizer/core'
 import {
   NModal,
   NForm,
@@ -221,7 +215,8 @@ import {
   NText,
   NTag,
   NTooltip,
-  NSpin
+  NSpin,
+  useDialog
 } from 'naive-ui'
 import ModelAdvancedSection from './ModelAdvancedSection.vue'
 import ExternalLinkIcon from './icons/ExternalLinkIcon.vue'
@@ -237,6 +232,8 @@ const { show } = defineProps({
 const emit = defineEmits(['update:show', 'saved'])
 
 const { t } = useI18n()
+const toast = useToast()
+const dialog = useDialog()
 const manager = inject<TextModelManager>('textModelManager')
 if (!manager) {
   throw new Error('Text model manager not provided')
@@ -266,14 +263,33 @@ const isEditing = computed(() => !!manager.editingModelId.value)
 
 // 获取当前选择的 Provider 的 API Key URL
 const currentProviderApiKeyUrl = computed(() => {
-  if (!form.value?.providerId) {
-    return null
-  }
-  
-  // 从 form 的 providerMeta 中获取 apiKeyUrl
-  const providerMeta = form.value?.providerMeta
-  return providerMeta?.apiKeyUrl || null
+  return manager.selectedProvider.value?.apiKeyUrl || null
 })
+
+const handleTestFormConnection = async () => {
+  const runTest = async () => {
+    await testFormConnection()
+  }
+
+  if (!isRunningInElectron()) {
+    const provider = manager.selectedProvider.value
+    if (provider?.corsRestricted) {
+      const providerName = provider.name || provider.id || 'Unknown Provider'
+      dialog.warning({
+        title: t('modelManager.corsRestrictedTag'),
+        content: () => h('div', { style: 'white-space: pre-line;' }, t('modelManager.corsRestrictedConfirm', { provider: providerName })),
+        positiveText: t('common.confirm'),
+        negativeText: t('common.cancel'),
+        // Don't block dialog close while the async test runs.
+        onPositiveClick: () => {
+          void runTest()
+        }
+      })
+      return
+    }
+  }
+  await runTest()
+}
 
 const handleUpdateShow = async (value: boolean) => {
   emit('update:show', value)
@@ -287,9 +303,38 @@ const handleUpdateShow = async (value: boolean) => {
 }
 
 const handleSubmit = async () => {
-  const id = await manager.saveForm()
-  emit('saved', id || undefined)
-  handleUpdateShow(false)
+  try {
+    const id = await manager.saveForm()
+    emit('saved', id || undefined)
+    handleUpdateShow(false)
+  } catch (error) {
+    console.error('保存模型失败:', error)
+
+    const rawError = error instanceof Error ? error.message : String(error)
+    const fallback = isEditing.value
+      ? t('modelManager.updateFailed', { error: rawError })
+      : t('modelManager.createFailed', { error: rawError })
+
+    const errorCode = (error as { code?: unknown } | null)?.code
+    const errorParams = (error as { params?: unknown } | null)?.params
+
+    if (typeof errorCode === 'string') {
+      try {
+        const translated = t(
+          errorCode,
+          (typeof errorParams === 'object' && errorParams) ? (errorParams as Record<string, unknown>) : {}
+        )
+        if (translated && translated !== errorCode) {
+          toast.error(translated)
+          return
+        }
+      } catch {
+        // fall back
+      }
+    }
+
+    toast.error(rawError || fallback)
+  }
 }
 
 const handleCancel = () => {
