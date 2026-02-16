@@ -47,18 +47,19 @@
                 size="small"
                 @show-detail="handleShowOriginalDetail"
                 @evaluate="handleEvaluateOriginal"
+                @evaluate-with-feedback="handleEvaluateWithFeedback"
                 @apply-improvement="handleApplyImprovement"
                 @apply-patch="handleApplyPatch"
               />
-              <NButton
+              <FocusAnalyzeButton
                 v-else
-                size="tiny"
-                secondary
-                :disabled="isEvaluatingOriginal"
-                @click="handleEvaluateOriginal"
-              >
-                {{ t('evaluation.evaluate') }}
-              </NButton>
+                type="original"
+                :label="t('evaluation.evaluate')"
+                :loading="isEvaluatingOriginal"
+                :button-props="{ size: 'tiny', secondary: true }"
+                @evaluate="handleEvaluateOriginal"
+                @evaluate-with-feedback="handleEvaluateWithFeedback"
+              />
             </div>
           </div>
         </template>
@@ -101,18 +102,19 @@
                 size="small"
                 @show-detail="handleShowOptimizedDetail"
                 @evaluate="handleEvaluateOptimized"
+                @evaluate-with-feedback="handleEvaluateWithFeedback"
                 @apply-improvement="handleApplyImprovement"
                 @apply-patch="handleApplyPatch"
               />
-              <NButton
+              <FocusAnalyzeButton
                 v-else
-                size="tiny"
-                secondary
-                :disabled="isEvaluatingOptimized"
-                @click="handleEvaluateOptimized"
-              >
-                {{ t('evaluation.evaluate') }}
-              </NButton>
+                type="optimized"
+                :label="t('evaluation.evaluate')"
+                :loading="isEvaluatingOptimized"
+                :button-props="{ size: 'tiny', secondary: true }"
+                @evaluate="handleEvaluateOptimized"
+                @evaluate-with-feedback="handleEvaluateWithFeedback"
+              />
             </div>
           </div>
         </template>
@@ -157,17 +159,18 @@
               size="small"
               @show-detail="handleShowOptimizedDetail"
               @evaluate="handleEvaluateOptimized"
+              @evaluate-with-feedback="handleEvaluateWithFeedback"
               @apply-improvement="handleApplyImprovement"
             />
-            <NButton
+            <FocusAnalyzeButton
               v-else
-              size="tiny"
-              secondary
-              :disabled="isEvaluatingOptimized"
-              @click="handleEvaluateOptimized"
-            >
-              {{ t('evaluation.evaluate', '评估') }}
-            </NButton>
+              type="optimized"
+              :label="t('evaluation.evaluate', '评估')"
+              :loading="isEvaluatingOptimized"
+              :button-props="{ size: 'tiny', secondary: true }"
+              @evaluate="handleEvaluateOptimized"
+              @evaluate-with-feedback="handleEvaluateWithFeedback"
+            />
           </div>
         </div>
       </template>
@@ -188,9 +191,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NFlex, NCard, NText, NButton } from 'naive-ui'
+import { NFlex, NCard, NText } from 'naive-ui'
 import ToolCallDisplay from './ToolCallDisplay.vue'
-import { EvaluationScoreBadge } from './evaluation'
+import { EvaluationScoreBadge, FocusAnalyzeButton } from './evaluation'
 import type { AdvancedTestResult, EvaluationResponse, EvaluationType, PatchOperation } from '@prompt-optimizer/core'
 import type { ScoreLevel } from './evaluation/types'
 
@@ -269,6 +272,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   'evaluate-original': []
   'evaluate-optimized': []
+  'evaluate-with-feedback': [payload: { type: EvaluationType; feedback: string }]
   'show-original-detail': []
   'show-optimized-detail': []
   'apply-improvement': [payload: { improvement: string; type: EvaluationType }]
@@ -295,6 +299,10 @@ const handleEvaluateOriginal = () => {
 
 const handleEvaluateOptimized = () => {
   emit('evaluate-optimized')
+}
+
+const handleEvaluateWithFeedback = (payload: { type: EvaluationType; feedback: string }) => {
+  emit('evaluate-with-feedback', payload)
 }
 
 const handleShowOriginalDetail = () => {
