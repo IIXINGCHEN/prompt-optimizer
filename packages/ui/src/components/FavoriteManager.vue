@@ -144,7 +144,19 @@
       mode="readonly"
       :enabled-actions="['copy', 'diff']"
       @copy="handlePreviewCopy"
-    />
+    >
+      <template #extra-content>
+        <FavoriteMediaPreviewPanel
+          v-if="previewFavorite"
+          :favorite="previewFavorite"
+        />
+        <FavoritePreviewExtensionHost
+          v-if="previewFavorite"
+          :favorite="previewFavorite"
+          @favorite-updated="handleFavoritePreviewUpdated"
+        />
+      </template>
+    </OutputDisplayFullscreen>
 
     <!-- 收藏导入 -->
     <n-modal
@@ -273,6 +285,8 @@ import ToastUI from './Toast.vue';
 const { t } = useI18n();
 import FavoriteCard from './FavoriteCard.vue';
 import OutputDisplayFullscreen from './OutputDisplayFullscreen.vue';
+import FavoriteMediaPreviewPanel from './FavoriteMediaPreviewPanel.vue';
+import FavoritePreviewExtensionHost from './FavoritePreviewExtensionHost.vue';
 import CategoryManager from './CategoryManager.vue';
 import CategoryTreeSelect from './CategoryTreeSelect.vue';
 import SaveFavoriteDialog from './SaveFavoriteDialog.vue';
@@ -438,6 +452,11 @@ const previewOriginalContent = computed(() => {
 
   return previewFavorite.value.metadata?.originalContent ?? '';
 });
+
+const handleFavoritePreviewUpdated = async (favoriteId: string) => {
+  await loadFavorites();
+  previewFavorite.value = favorites.value.find((favorite) => favorite.id === favoriteId) || null;
+};
 
 // 网格布局配置：根据视口宽度自适应列数
 // 移动端 (< 768px): 1 列

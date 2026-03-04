@@ -1,6 +1,11 @@
 import type { Ref } from 'vue'
 import type { Router } from 'vue-router'
-import type { ConversationMessage, PromptRecordChain } from '@prompt-optimizer/core'
+import type {
+  ConversationMessage,
+  IFavoriteManager,
+  IImageStorageService,
+  PromptRecordChain,
+} from '@prompt-optimizer/core'
 
 import type { BasicSystemSessionApi } from '../stores/session/useBasicSystemSession'
 import type { BasicUserSessionApi } from '../stores/session/useBasicUserSession'
@@ -8,6 +13,21 @@ import type { ProMultiMessageSessionApi } from '../stores/session/useProMultiMes
 import type { ProVariableSessionApi } from '../stores/session/useProVariableSession'
 import type { ImageText2ImageSessionApi } from '../stores/session/useImageText2ImageSession'
 import type { ImageImage2ImageSessionApi } from '../stores/session/useImageImage2ImageSession'
+
+export interface SaveFavoriteDialogDraft {
+  content: string
+  originalContent?: string
+  prefill?: {
+    title?: string
+    description?: string
+    category?: string
+    tags?: string[]
+    functionMode?: 'basic' | 'context' | 'image'
+    optimizationMode?: 'system' | 'user'
+    imageSubMode?: 'text2image' | 'image2image'
+    metadata?: Record<string, unknown>
+  }
+}
 
 export interface OptionalIntegrationsContext {
   router: Pick<Router, 'currentRoute' | 'push' | 'replace'>
@@ -27,6 +47,13 @@ export interface OptionalIntegrationsContext {
   imageText2ImageSession: ImageText2ImageSessionApi
   imageImage2ImageSession: ImageImage2ImageSessionApi
   optimizerCurrentVersions: Ref<PromptRecordChain['versions']>
+
+  /** Lazy getter to avoid hard coupling optional integrations to app service lifecycle. */
+  getFavoriteManager: () => IFavoriteManager | null
+  /** Lazy getter for optional favorite image asset storage integration. */
+  getFavoriteImageStorageService: () => IImageStorageService | null
+  /** Optional callback to open save-favorite dialog after import. */
+  openSaveFavoriteDialog?: (draft: SaveFavoriteDialogDraft) => void
 }
 
 export interface OptionalIntegration {

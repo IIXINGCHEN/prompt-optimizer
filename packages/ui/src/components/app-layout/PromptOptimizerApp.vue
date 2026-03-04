@@ -123,6 +123,7 @@
                 v-model:show="showSaveFavoriteDialog"
                 :content="saveFavoriteData?.content || ''"
                 :original-content="saveFavoriteData?.originalContent || ''"
+                :prefill="saveFavoriteData?.prefill"
                 :current-function-mode="routeFunctionMode"
                 :current-optimization-mode="selectedOptimizationMode"
                 @saved="handleSaveFavoriteComplete"
@@ -1655,6 +1656,10 @@ void registerOptionalIntegrations({
     proVariableSession,
     imageText2ImageSession,
     imageImage2ImageSession,
+    getFavoriteManager: () => services.value?.favoriteManager || null,
+    getFavoriteImageStorageService:
+      () => services.value?.favoriteImageStorageService || services.value?.imageStorageService || null,
+    openSaveFavoriteDialog: (data) => handleSaveFavorite(data),
     optimizerCurrentVersions,
 });
 provide("handleSaveFavorite", handleSaveFavorite);
