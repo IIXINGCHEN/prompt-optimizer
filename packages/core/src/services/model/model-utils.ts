@@ -17,8 +17,10 @@ function getStaticModelKeys(): string[] {
  * @returns 格式化的显示名称
  */
 export function generateCustomModelName(suffix: string): string {
-  // 将下划线和连字符替换为空格，并转换为标题格式
+  // 将版本号中的下划线转换为小数点（如 qwen3_5 -> qwen3.5）
+  // 再将其余下划线和连字符替换为空格，并转换为标题格式
   return suffix
+    .replace(/(\d)_(\d)/g, '$1.$2')
     .replace(/[_-]/g, ' ')
     .split(' ')
     .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
@@ -91,7 +93,7 @@ export function generateTextModelConfig(envConfig: ValidatedCustomModelEnvConfig
       apiKey: envConfig.apiKey,
       baseURL: envConfig.baseURL
     },
-    paramOverrides: {}
+    paramOverrides: envConfig.params ? { ...envConfig.params } : {}
   };
 }
 

@@ -1,32 +1,35 @@
 <template>
-  <NSpace vertical :size="12">
+  <NSpace vertical :size="12" class="model-list-stack">
     <NCard
       v-for="model in models"
       :key="model.id"
+      size="small"
       hoverable
+      class="model-config-card"
       :style="{ opacity: model.enabled ? 1 : 0.6 }"
     >
       <template #header>
         <NSpace justify="space-between" align="center">
-          <NSpace vertical :size="2">
-            <NSpace align="center">
+          <NSpace vertical :size="4" class="model-card-heading">
+            <NSpace align="center" :size="8">
               <NText strong>{{ model.name }}</NText>
-              <NTag v-if="!model.enabled" type="warning" size="small">
+              <NTag v-if="!model.enabled" type="warning" size="small" round :bordered="false">
                 {{ t('modelManager.disabled') }}
               </NTag>
             </NSpace>
 
-            <NSpace :size="6">
-              <NTag size="small" type="info" :bordered="false">
+            <NSpace :size="6" class="model-card-tags">
+              <NTag size="small" type="default" round :bordered="false">
                 {{ model.providerMeta?.name || model.providerMeta?.id }}
               </NTag>
-              <NTag size="small" type="primary" :bordered="false">
+              <NTag size="small" type="info" round :bordered="false">
                 {{ model.modelMeta?.name || model.modelMeta?.id }}
               </NTag>
               <NTag
                 v-if="model.providerMeta?.corsRestricted && !isElectronEnv"
                 size="small"
                 type="error"
+                round
                 :bordered="false"
               >
                 {{ t('modelManager.corsRestrictedTag') }}
@@ -35,6 +38,7 @@
                 v-if="model.modelMeta?.capabilities?.supportsTools"
                 size="small"
                 type="success"
+                round
                 :bordered="false"
               >
                 {{ t('modelManager.capabilities.tools') }}
@@ -43,17 +47,18 @@
                 v-if="model.modelMeta?.capabilities?.supportsReasoning"
                 size="small"
                 type="warning"
+                round
                 :bordered="false"
               >
                 {{ t('modelManager.capabilities.reasoning') }}
               </NTag>
-                          </NSpace>
+            </NSpace>
           </NSpace>
         </NSpace>
       </template>
 
       <template #header-extra>
-        <NSpace @click.stop>
+        <NSpace @click.stop :size="4" class="model-card-actions">
           <NButton
             @click="emit('test', model.id)"
             size="small"
@@ -81,7 +86,11 @@
             <span class="hidden md:inline">{{ t('modelManager.testConnection') }}</span>
           </NButton>
 
-          <NButton @click="emit('edit', model.id)" size="small" quaternary>
+          <NButton
+            @click="emit('edit', model.id)"
+            size="small"
+            quaternary
+          >
             <template #icon>
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -99,6 +108,20 @@
               </svg>
             </template>
             <span class="hidden md:inline">{{ t('modelManager.editModel') }}</span>
+          </NButton>
+
+          <NButton
+            @click="emit('clone', model.id)"
+            size="small"
+            quaternary
+          >
+            <template #icon>
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+            </template>
+            <span class="hidden md:inline">{{ t('modelManager.cloneModel') }}</span>
           </NButton>
 
           <NButton
@@ -139,9 +162,7 @@
                 <path d="M12 6v4" />
               </svg>
             </template>
-            <span class="hidden md:inline">
-              {{ model.enabled ? t('common.disable') : t('common.enable') }}
-            </span>
+            <span class="hidden md:inline">{{ model.enabled ? t('common.disable') : t('common.enable') }}</span>
           </NButton>
 
           <NButton
@@ -163,7 +184,7 @@
                 <path
                   stroke-linecap="round"
                   stroke-linejoin="round"
-                  d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"
+                  d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.11 0 0 0-7.5 0"
                 />
               </svg>
             </template>
@@ -197,9 +218,41 @@ const { models, isTestingConnectionFor, isDefaultModel } = defineProps({
   }
 })
 
-const emit = defineEmits(['test', 'edit', 'enable', 'disable', 'delete'])
+const emit = defineEmits(['test', 'edit', 'clone', 'enable', 'disable', 'delete'])
 
 const { t } = useI18n()
 
 const isElectronEnv = isRunningInElectron()
 </script>
+
+<style scoped>
+.model-list-stack {
+  width: 100%;
+}
+
+.model-config-card {
+   border-radius: 16px;
+}
+
+.model-config-card :deep(.n-card-header) {
+  padding-bottom: 10px;
+}
+
+.model-config-card :deep(.n-card__content) {
+  padding-top: 0;
+}
+
+.model-card-heading,
+.model-card-tags {
+  max-width: 100%;
+}
+
+.model-card-tags {
+  flex-wrap: wrap;
+}
+
+.model-card-actions {
+  align-items: center;
+  flex-wrap: nowrap;
+}
+</style>

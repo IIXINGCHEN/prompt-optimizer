@@ -8,50 +8,55 @@
     </NEmpty>
 
     <!-- 模型列表 -->
-    <NSpace v-else vertical :size="12">
+    <NSpace v-else vertical :size="12" class="image-model-stack">
       <NCard
         v-for="config in configs"
         :key="config.id"
+        size="small"
         hoverable
+        class="image-model-card"
         :style="{
           opacity: config.enabled ? 1 : 0.6
         }"
       >
         <template #header>
           <NSpace justify="space-between" align="center">
-            <NSpace vertical :size="2">
+            <NSpace vertical :size="4" class="image-model-heading">
               <!-- 配置名称行 -->
-              <NSpace align="center">
+              <NSpace align="center" :size="8">
                 <NText strong>{{ config.name || config.id }}</NText>
                 <NTag
                   v-if="!config.enabled"
                   type="warning"
                   size="small"
+                  round
+                  :bordered="false"
                 >
                   {{ t('modelManager.disabled') }}
                 </NTag>
               </NSpace>
               <!-- 标签行：Provider、Model、能力标签合并 -->
-              <NSpace :size="6">
-                <NTag size="small" type="info" :bordered="false">
+              <NSpace :size="6" class="image-model-tags">
+                <NTag size="small" type="default" round :bordered="false">
                   {{ config.provider?.name || config.providerId }}
                 </NTag>
-                <NTag size="small" type="primary" :bordered="false">
+                <NTag size="small" type="info" round :bordered="false">
                   {{ config.model?.name || config.modelId }}
                 </NTag>
                 <NTag
                   v-if="config.provider?.corsRestricted && !isElectronEnv"
                   size="small"
                   type="error"
+                  round
                   :bordered="false"
                 >
                   {{ t('modelManager.corsRestrictedTag') }}
                 </NTag>
                 <!-- 能力标签移到这里 -->
-                <NTag v-if="config.model?.capabilities?.text2image" size="small" type="success" :bordered="false">
+                <NTag v-if="config.model?.capabilities?.text2image" size="small" type="success" round :bordered="false">
                   {{ t('image.capability.text2image') }}
                 </NTag>
-                <NTag v-if="config.model?.capabilities?.image2image" size="small" type="info" :bordered="false">
+                <NTag v-if="config.model?.capabilities?.image2image" size="small" type="info" round :bordered="false">
                   {{ t('image.capability.image2image') }}
                 </NTag>
               </NSpace>
@@ -60,7 +65,7 @@
         </template>
         
         <template #header-extra>
-          <NSpace @click.stop>
+          <NSpace @click.stop :size="4" class="image-model-actions">
             <NButton
               @click="testConnection(config.id)"
               size="small"
@@ -103,6 +108,20 @@
             </NButton>
 
             <NButton
+              @click="cloneConfig(config.id)"
+              size="small"
+              quaternary
+            >
+              <template #icon>
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+              </template>
+              <span class="hidden md:inline">{{ t('modelManager.cloneModel') }}</span>
+            </NButton>
+
+            <NButton
               @click="toggleConfig(config)"
               size="small"
               :type="config.enabled ? 'warning' : 'success'"
@@ -131,7 +150,7 @@
             >
               <template #icon>
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                  <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.11 0 0 0-7.5 0" />
                 </svg>
               </template>
               <span class="hidden md:inline">{{ t('common.delete') }}</span>
@@ -161,7 +180,7 @@ const dialog = useDialog()
 const isElectronEnv = isRunningInElectron()
 
 // 定义事件
-const emit = defineEmits(['add', 'edit'])
+const emit = defineEmits(['add', 'edit', 'clone'])
 
 // 使用 composable
 const {
@@ -228,6 +247,23 @@ const openAddModal = () => {
 
 const editConfig = (configId: string) => {
   emit('edit', configId)
+}
+
+const cloneConfig = (configId: string) => {
+  const source = configs.value.find(c => c.id === configId)
+  if (!source) return
+
+  try {
+    const cloned = {
+      ...JSON.parse(JSON.stringify(source)),
+      id: '',
+      name: `${source.name || source.id} (Copy)`
+    }
+    emit('clone', cloned)
+  } catch (error) {
+    console.error('Failed to clone model config:', error)
+    toast.error(t('modelManager.cloneFailed'))
+  }
 }
 
 const testConnection = async (configId: string) => {
@@ -352,6 +388,36 @@ defineExpose({
 <style scoped>
 .image-model-list {
   width: 100%;
+}
+
+.image-model-stack {
+  width: 100%;
+}
+
+.image-model-card {
+   border-radius: 16px;
+}
+
+.image-model-card :deep(.n-card-header) {
+  padding-bottom: 10px;
+}
+
+.image-model-card :deep(.n-card__content) {
+  padding-top: 0;
+}
+
+.image-model-heading,
+.image-model-tags {
+  max-width: 100%;
+}
+
+.image-model-tags {
+  flex-wrap: wrap;
+}
+
+.image-model-actions {
+  align-items: center;
+  flex-wrap: nowrap;
 }
 
 /* 文本截断样式 */

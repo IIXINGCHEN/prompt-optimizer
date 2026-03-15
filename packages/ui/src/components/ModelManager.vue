@@ -4,6 +4,7 @@
       :show="show"
       preset="card"
       :style="{ width: '90vw', maxWidth: '1200px', maxHeight: '90vh' }"
+      content-style="padding: 0; display: flex; flex-direction: column; height: min(75vh, 800px); overflow: hidden;"
       :title="t('modelManager.title')"
       size="large"
       :bordered="false"
@@ -63,29 +64,49 @@
         </NButton>
       </template>
 
-      <NScrollbar style="max-height: 75vh;">
-        <NTabs v-model:value="activeTab" type="line" size="small" style="margin-bottom: 12px;">
-          <NTabPane name="text" :tab="t('modelManager.textModels')">
-            <TextModelManager ref="textManagerRef" @models-updated="handleTextModelsUpdated" />
-          </NTabPane>
-          <NTabPane name="image" :tab="t('modelManager.imageModels')">
-            <ImageModelManager
-              ref="imageListRef"
-              @edit="handleEditImageModel"
-              @add="handleAddImageModel"
-            />
-          </NTabPane>
-          <NTabPane name="function" :tab="t('modelManager.functionModels')">
-            <FunctionModelManager ref="functionManagerRef" />
-          </NTabPane>
+      <div class="model-manager-content">
+        <NTabs v-model:value="activeTab" type="segment" size="small" animated class="model-manager-tabs">
+          <NTabPane name="text" :tab="t('modelManager.textModels')" />
+          <NTabPane name="image" :tab="t('modelManager.imageModels')" />
+          <NTabPane name="function" :tab="t('modelManager.functionModels')" />
         </NTabs>
-      </NScrollbar>
+
+        <div class="model-manager-panel">
+          <NCard
+            embedded
+            size="small"
+            :bordered="false"
+            class="model-manager-shell"
+            content-style="padding: 16px; display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0;"
+          >
+            <div class="model-manager-scroll-area">
+              <TextModelManager
+                v-show="activeTab === 'text'"
+                ref="textManagerRef"
+                @models-updated="handleTextModelsUpdated"
+              />
+              <ImageModelManager
+                v-show="activeTab === 'image'"
+                ref="imageListRef"
+                @edit="handleEditImageModel"
+                @clone="handleCloneImageModel"
+                @add="handleAddImageModel"
+              />
+              <FunctionModelManager
+                v-show="activeTab === 'function'"
+                ref="functionManagerRef"
+              />
+            </div>
+          </NCard>
+        </div>
+      </div>
     </NModal>
 
     <ImageModelEditModal
       :show="showImageModelEdit"
       :config-id="editingImageModelId"
-      @update:show="showImageModelEdit = $event"
+      :initial-config="draftImageModelConfig"
+      @update:show="updateImageEditModalVisibility"
       @saved="handleImageModelSaved"
     />
   </ToastUI>
@@ -95,7 +116,8 @@
 import { inject, onMounted, onUnmounted, provide, ref, type Ref } from 'vue'
 
 import { useI18n } from 'vue-i18n'
-import { NButton, NModal, NScrollbar, NTabs, NTabPane } from 'naive-ui'
+import { NButton, NCard, NModal, NTabs, NTabPane } from 'naive-ui'
+import type { ImageModelConfig } from '@prompt-optimizer/core'
 import ImageModelEditModal from './ImageModelEditModal.vue'
 import ImageModelManager from './ImageModelManager.vue'
 import TextModelManager from './TextModelManager.vue'
@@ -120,6 +142,7 @@ const imageListRef = ref<InstanceType<typeof ImageModelManager> | null>(null)
 const functionManagerRef = ref<InstanceType<typeof FunctionModelManager> | null>(null)
 const showImageModelEdit = ref(false)
 const editingImageModelId = ref<string | undefined>(undefined)
+const draftImageModelConfig = ref<ImageModelConfig | undefined>(undefined)
 
 const services = inject<Ref<AppServices | null>>('services')
 if (!services?.value) {
@@ -151,17 +174,34 @@ const handleTextModelsUpdated = (id?: string) => {
 
 const handleAddImageModel = () => {
   editingImageModelId.value = undefined
+  draftImageModelConfig.value = undefined
   showImageModelEdit.value = true
 }
 
 const handleEditImageModel = (configId: string) => {
   editingImageModelId.value = configId
+  draftImageModelConfig.value = undefined
   showImageModelEdit.value = true
+}
+
+const handleCloneImageModel = (draft: ImageModelConfig) => {
+  editingImageModelId.value = undefined
+  draftImageModelConfig.value = draft
+  showImageModelEdit.value = true
+}
+
+const updateImageEditModalVisibility = (value: boolean) => {
+  showImageModelEdit.value = value
+  if (!value) {
+    editingImageModelId.value = undefined
+    draftImageModelConfig.value = undefined
+  }
 }
 
 const handleImageModelSaved = () => {
   showImageModelEdit.value = false
   editingImageModelId.value = undefined
+  draftImageModelConfig.value = undefined
   try {
     imageListRef.value?.refresh?.()
   } catch {
@@ -184,6 +224,57 @@ if (typeof window !== 'undefined') {
 </script>
 
 <style scoped>
+.model-manager-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.model-manager-tabs {
+  flex: 0 0 auto;
+}
+
+.model-manager-tabs :deep(.n-tabs-nav) {
+  margin-bottom: 0;
+}
+
+.model-manager-tabs :deep(.n-tabs-nav-scroll-wrapper) {
+  padding: 2px;
+}
+
+.model-manager-tabs :deep(.n-tabs-content) {
+  display: none;
+}
+
+.model-manager-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.model-manager-shell {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 16px;
+}
+
+.model-manager-shell :deep(.n-card__content) {
+  min-height: 0;
+}
+
+.model-manager-scroll-area {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
 .modal-enter-active,
 .modal-leave-active {
   transition: all 0.3s ease;
