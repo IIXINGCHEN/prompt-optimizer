@@ -4,10 +4,14 @@
  * 使用 LLM 对测试结果进行智能评估和打分
  */
 
-import type { ILLMService, StreamHandlers } from '../llm/types';
+import type { ILLMService, Message, StreamHandlers } from '../llm/types';
 import type { IModelManager } from '../model/types';
 import type { ITemplateManager, Template } from '../template/types';
 import { TemplateProcessor, type TemplateContext } from '../template/processor';
+import {
+  buildStructuredComparePairJudgeMessages,
+  buildStructuredCompareSynthesisMessages,
+} from './structured-compare-prompts';
 import {
   type IEvaluationService,
   type EvaluationRequest,
@@ -22,6 +26,13 @@ import {
   type EvaluationContentBlock,
   type EvaluationSnapshot,
   type EvaluationTestCase,
+  type StructuredCompareRole,
+  type CompareStopSignals,
+  type CompareJudgement,
+  type CompareInsightHighlight,
+  type CompareInsights,
+  type CompareJudgementPairType,
+  type CompareConflictSignal,
 } from './types';
 import {
   EvaluationValidationError,
@@ -31,6 +42,114 @@ import {
   EvaluationParseError,
 } from './errors';
 import { jsonrepair } from 'jsonrepair';
+
+type ComparePromptLanguage = 'zh' | 'en';
+
+interface NormalizedEvaluationTestCase {
+  id: string;
+  label: string;
+  hasLabel: boolean;
+  inputKind: string;
+  inputLabel: string;
+  inputContent: string;
+  inputSummary: string;
+  hasInputSummary: boolean;
+  settingsSummary: string;
+  hasSettingsSummary: boolean;
+}
+
+interface NormalizedEvaluationSnapshot {
+  id: string;
+  label: string;
+  testCaseId: string;
+  testCaseLabel: string;
+  promptText: string;
+  promptMatchesWorkspace: boolean;
+  hasDistinctPromptText: boolean;
+  promptRefKind: EvaluationSnapshot['promptRef']['kind'];
+  promptRefLabel: string;
+  role: StructuredCompareRole | '';
+  roleLabel: string;
+  hasRole: boolean;
+  isTarget: boolean;
+  isBaseline: boolean;
+  isReference: boolean;
+  isReferenceBaseline: boolean;
+  isReplica: boolean;
+  isAuxiliary: boolean;
+  modelKey: string;
+  hasModelKey: boolean;
+  versionLabel: string;
+  hasVersionLabel: boolean;
+  reasoning: string;
+  hasReasoning: boolean;
+  output: string;
+  executionInputLabel: string;
+  executionInputContent: string;
+  executionInputSummary: string;
+  hasExecutionInputSummary: boolean;
+  hasExecutionInput: boolean;
+  inputLabel: string;
+  inputContent: string;
+  inputSummary: string;
+  hasInputSummary: boolean;
+  hasInput: boolean;
+}
+
+interface StructuredCompareRoleBinding {
+  snapshotId: string;
+  snapshotLabel: string;
+  role: StructuredCompareRole;
+  roleLabel: string;
+}
+
+interface StructuredCompareJudgePlanItem {
+  key: string;
+  pairType: CompareJudgementPairType;
+  label: string;
+  purpose: string;
+  signalName: 'progress' | 'gap' | 'promptValidity' | 'stability';
+  allowedSignals: string[];
+  left: NormalizedEvaluationSnapshot;
+  right: NormalizedEvaluationSnapshot;
+}
+
+interface StructuredCompareJudgeResult extends CompareJudgement {}
+
+interface StructuredCompareSignalSnapshot {
+  progress?: 'improved' | 'flat' | 'regressed' | 'unclear';
+  gap?: 'none' | 'minor' | 'major' | 'unclear';
+  promptValidity?: 'supported' | 'mixed' | 'unsupported' | 'unclear';
+  stability?: 'stable' | 'unstable' | 'unclear';
+}
+
+interface ComparePromptSubjectConfig {
+  subjectLabel: string;
+  roleName: string;
+}
+
+interface NormalizedContentBlock {
+  kind: string;
+  label: string;
+  content: string;
+  summary: string;
+  hasSummary: boolean;
+}
+
+interface NormalizedCompareContext {
+  compareMode: 'generic' | 'structured';
+  snapshotRoles?: Record<string, StructuredCompareRole>;
+  normalizedTestCases: NormalizedEvaluationTestCase[];
+  renderedTestCases: NormalizedEvaluationTestCase[];
+  testCaseMap: Map<string, NormalizedEvaluationTestCase>;
+  normalizedSnapshots: NormalizedEvaluationSnapshot[];
+  compareRoleBindings: StructuredCompareRoleBinding[];
+  samePromptAcrossSnapshots: boolean;
+  sharedCompareInputs: boolean;
+  crossModelComparison: boolean;
+  hasEditableWorkspaceTarget: boolean;
+  judgePlan: StructuredCompareJudgePlanItem[];
+}
 
 /**
  * 评估服务实现类
@@ -49,20 +168,33 @@ export class EvaluationService implements IEvaluationService {
     this.validateRequest(request);
     await this.validateModel(request.evaluationModelKey);
 
+    let normalizedCompare: NormalizedCompareContext | undefined;
+    if (request.type === 'compare') {
+      normalizedCompare = this.normalizeCompareRequest(request);
+      if (normalizedCompare.compareMode === 'structured') {
+        return this.evaluateStructuredCompare(request, normalizedCompare);
+      }
+    }
+
     const template = await this.getEvaluationTemplate(request.type, request.mode);
-    const context = this.buildTemplateContext(request);
+    const context = this.buildTemplateContext(request, normalizedCompare);
     const messages = TemplateProcessor.processTemplate(template, context);
 
     const startTime = Date.now();
     try {
       const result = await this.llmService.sendMessage(messages, request.evaluationModelKey);
       const duration = Date.now() - startTime;
+      const responseMetadata = this.buildResponseMetadata(
+        request,
+        {
+          model: request.evaluationModelKey,
+          timestamp: Date.now(),
+          duration,
+        },
+        normalizedCompare
+      );
 
-      return this.parseEvaluationResult(result, request.type, {
-        model: request.evaluationModelKey,
-        timestamp: Date.now(),
-        duration,
-      });
+      return this.parseEvaluationResult(result, request.type, responseMetadata);
     } catch (error) {
       throw new EvaluationExecutionError(
         error instanceof Error ? error.message : String(error),
@@ -92,6 +224,19 @@ export class EvaluationService implements IEvaluationService {
       return;
     }
 
+    let normalizedCompare: NormalizedCompareContext | undefined;
+    if (request.type === 'compare') {
+      normalizedCompare = this.normalizeCompareRequest(request);
+      if (normalizedCompare.compareMode === 'structured') {
+        try {
+          await this.evaluateStructuredCompareStream(request, normalizedCompare, callbacks);
+        } catch (error) {
+          callbacks.onError(error instanceof Error ? error : new Error(String(error)));
+        }
+        return;
+      }
+    }
+
     let template: Template;
     try {
       template = await this.getEvaluationTemplate(request.type, request.mode);
@@ -100,7 +245,7 @@ export class EvaluationService implements IEvaluationService {
       return;
     }
 
-    const context = this.buildTemplateContext(request);
+    const context = this.buildTemplateContext(request, normalizedCompare);
     const messages = TemplateProcessor.processTemplate(template, context);
 
     let fullContent = '';
@@ -114,11 +259,19 @@ export class EvaluationService implements IEvaluationService {
       onComplete: () => {
         const duration = Date.now() - startTime;
         try {
-          const response = this.parseEvaluationResult(fullContent, request.type, {
-            model: request.evaluationModelKey,
-            timestamp: Date.now(),
-            duration,
-          });
+          const response = this.parseEvaluationResult(
+            fullContent,
+            request.type,
+            this.buildResponseMetadata(
+              request,
+              {
+                model: request.evaluationModelKey,
+                timestamp: Date.now(),
+                duration,
+              },
+              normalizedCompare
+            )
+          );
           callbacks.onComplete(response);
         } catch (error) {
           callbacks.onError(error instanceof Error ? error : new Error(String(error)));
@@ -265,7 +418,10 @@ export class EvaluationService implements IEvaluationService {
   /**
    * 构建模板上下文
    */
-  private buildTemplateContext(request: EvaluationRequest): TemplateContext {
+  private buildTemplateContext(
+    request: EvaluationRequest,
+    normalizedCompare?: NormalizedCompareContext
+  ): TemplateContext {
     const baseContext: TemplateContext = {
       ...(request.variables || {}),
     };
@@ -284,7 +440,11 @@ export class EvaluationService implements IEvaluationService {
         return this.buildResultTemplateContext(baseContext, request);
 
       case 'compare':
-        return this.buildCompareTemplateContext(baseContext, request);
+        return this.buildCompareTemplateContext(
+          baseContext,
+          request,
+          normalizedCompare ?? this.normalizeCompareRequest(request)
+        );
 
       case 'prompt-only':
         return {
@@ -304,6 +464,771 @@ export class EvaluationService implements IEvaluationService {
       default:
         return baseContext;
     }
+  }
+
+  private buildResponseMetadata(
+    request: EvaluationRequest,
+    baseMetadata: NonNullable<EvaluationResponse['metadata']>,
+    normalizedCompare?: NormalizedCompareContext
+  ): NonNullable<EvaluationResponse['metadata']> {
+    if (request.type !== 'compare') {
+      return baseMetadata;
+    }
+
+    const compare = normalizedCompare ?? this.normalizeCompareRequest(request);
+
+    return {
+      ...baseMetadata,
+      compareMode: compare.compareMode,
+      ...(compare.snapshotRoles ? { snapshotRoles: compare.snapshotRoles } : {}),
+    };
+  }
+
+  private normalizeStructuredCompareRole(value: unknown): StructuredCompareRole | undefined {
+    switch (value) {
+      case 'target':
+      case 'baseline':
+      case 'reference':
+      case 'referenceBaseline':
+      case 'replica':
+      case 'auxiliary':
+        return value;
+      default:
+        return undefined;
+    }
+  }
+
+  private normalizeSnapshotRoles(
+    snapshotRoles: Record<string, unknown> | undefined,
+    snapshots?: EvaluationSnapshot[]
+  ): Record<string, StructuredCompareRole> | undefined {
+    if (!snapshotRoles || typeof snapshotRoles !== 'object') {
+      return undefined;
+    }
+
+    const validSnapshotIds =
+      Array.isArray(snapshots) && snapshots.length > 0
+        ? new Set(snapshots.map((snapshot) => snapshot.id.trim()).filter(Boolean))
+        : null;
+    const normalizedEntries = Object.entries(snapshotRoles)
+      .map(([snapshotId, role]) => {
+        const normalizedId = snapshotId.trim();
+        const normalizedRole = this.normalizeStructuredCompareRole(role);
+        if (
+          !normalizedId ||
+          !normalizedRole ||
+          (validSnapshotIds && !validSnapshotIds.has(normalizedId))
+        ) {
+          return null;
+        }
+        return [normalizedId, normalizedRole] as const;
+      })
+      .filter((entry): entry is readonly [string, StructuredCompareRole] => !!entry);
+
+    return normalizedEntries.length
+      ? Object.fromEntries(normalizedEntries)
+      : undefined;
+  }
+
+  private hasStructuredSingletonRoleConflicts(
+    snapshotRoles: Record<string, StructuredCompareRole> | undefined
+  ): boolean {
+    if (!snapshotRoles) {
+      return false;
+    }
+
+    const singletonRoleCounts = Object.values(snapshotRoles).reduce(
+      (accumulator, role) => {
+        if (
+          role === 'target' ||
+          role === 'baseline' ||
+          role === 'reference' ||
+          role === 'referenceBaseline'
+        ) {
+          accumulator[role] += 1;
+        }
+        return accumulator;
+      },
+      {
+        target: 0,
+        baseline: 0,
+        reference: 0,
+        referenceBaseline: 0,
+      } as Record<'target' | 'baseline' | 'reference' | 'referenceBaseline', number>
+    );
+
+    return Object.values(singletonRoleCounts).some((count) => count > 1);
+  }
+
+  private normalizeCompareStopSignals(value: unknown): CompareStopSignals | undefined {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return undefined;
+    }
+
+    const normalized = value as Record<string, unknown>;
+    const stopReasons = Array.isArray(normalized.stopReasons)
+      ? normalized.stopReasons
+          .map((item) => String(item || '').trim())
+          .filter(Boolean)
+      : undefined;
+
+    const compareStopSignals: CompareStopSignals = {
+      targetVsBaseline:
+        normalized.targetVsBaseline === 'improved' ||
+        normalized.targetVsBaseline === 'flat' ||
+        normalized.targetVsBaseline === 'regressed'
+          ? normalized.targetVsBaseline
+          : undefined,
+      targetVsReferenceGap:
+        normalized.targetVsReferenceGap === 'none' ||
+        normalized.targetVsReferenceGap === 'minor' ||
+        normalized.targetVsReferenceGap === 'major'
+          ? normalized.targetVsReferenceGap
+          : undefined,
+      improvementHeadroom:
+        normalized.improvementHeadroom === 'none' ||
+        normalized.improvementHeadroom === 'low' ||
+        normalized.improvementHeadroom === 'medium' ||
+        normalized.improvementHeadroom === 'high'
+          ? normalized.improvementHeadroom
+          : undefined,
+      overfitRisk:
+        normalized.overfitRisk === 'low' ||
+        normalized.overfitRisk === 'medium' ||
+        normalized.overfitRisk === 'high'
+          ? normalized.overfitRisk
+          : undefined,
+      stopRecommendation:
+        normalized.stopRecommendation === 'continue' ||
+        normalized.stopRecommendation === 'stop' ||
+        normalized.stopRecommendation === 'review'
+          ? normalized.stopRecommendation
+          : undefined,
+      stopReasons: stopReasons?.length ? stopReasons : undefined,
+    };
+
+    return Object.values(compareStopSignals).some((item) =>
+      Array.isArray(item) ? item.length > 0 : item !== undefined
+    )
+      ? compareStopSignals
+      : undefined;
+  }
+
+  private normalizeCompareJudgements(value: unknown): CompareJudgement[] | undefined {
+    if (!Array.isArray(value)) {
+      return undefined;
+    }
+
+    const judgements = value
+      .map<CompareJudgement | null>((item) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) {
+          return null;
+        }
+
+        const record = item as Record<string, unknown>;
+        const pairKey = String(record.pairKey || '').trim();
+        const pairLabel = String(record.pairLabel || pairKey).trim();
+        const leftSnapshotId = String(record.leftSnapshotId || '').trim();
+        const leftSnapshotLabel = String(record.leftSnapshotLabel || leftSnapshotId).trim();
+        const rightSnapshotId = String(record.rightSnapshotId || '').trim();
+        const rightSnapshotLabel = String(record.rightSnapshotLabel || rightSnapshotId).trim();
+
+        if (
+          !pairKey ||
+          !pairLabel ||
+          !leftSnapshotId ||
+          !leftSnapshotLabel ||
+          !rightSnapshotId ||
+          !rightSnapshotLabel
+        ) {
+          return null;
+        }
+
+        const pairType =
+          record.pairType === 'targetBaseline' ||
+          record.pairType === 'targetReference' ||
+          record.pairType === 'referenceBaseline' ||
+          record.pairType === 'targetReplica'
+            ? record.pairType
+            : null;
+        if (!pairType) {
+          return null;
+        }
+
+        const verdict =
+          record.verdict === 'left-better' ||
+          record.verdict === 'right-better' ||
+          record.verdict === 'mixed' ||
+          record.verdict === 'similar'
+            ? record.verdict
+            : 'mixed';
+        const winner =
+          record.winner === 'left' || record.winner === 'right' || record.winner === 'none'
+            ? record.winner
+            : 'none';
+        const confidence =
+          record.confidence === 'low' ||
+          record.confidence === 'medium' ||
+          record.confidence === 'high'
+            ? record.confidence
+            : 'low';
+
+        const judgement: CompareJudgement = {
+          pairKey,
+          pairType,
+          pairLabel,
+          leftSnapshotId,
+          leftSnapshotLabel,
+          leftRole: this.normalizeStructuredCompareRole(record.leftRole),
+          rightSnapshotId,
+          rightSnapshotLabel,
+          rightRole: this.normalizeStructuredCompareRole(record.rightRole),
+          verdict,
+          winner,
+          confidence,
+          pairSignal: String(record.pairSignal || '').trim(),
+          analysis: String(record.analysis || '').trim(),
+          evidence: Array.isArray(record.evidence)
+            ? record.evidence
+                .map((entry) => String(entry || '').trim())
+                .filter(Boolean)
+                .slice(0, 4)
+            : [],
+          learnableSignals: Array.isArray(record.learnableSignals)
+            ? record.learnableSignals
+                .map((entry) => String(entry || '').trim())
+                .filter(Boolean)
+                .slice(0, 4)
+            : [],
+          overfitWarnings: Array.isArray(record.overfitWarnings)
+            ? record.overfitWarnings
+                .map((entry) => String(entry || '').trim())
+                .filter(Boolean)
+                .slice(0, 4)
+            : [],
+        };
+
+        return judgement;
+      })
+      .filter((item): item is CompareJudgement => item !== null);
+
+    return judgements.length ? judgements : undefined;
+  }
+
+  private buildCompareInsights(compareJudgements: CompareJudgement[] | undefined): CompareInsights | undefined {
+    if (!compareJudgements?.length) {
+      return undefined;
+    }
+
+    const sortedJudgements = [...compareJudgements].sort((left, right) => {
+      const pairPriority =
+        this.getCompareJudgementPairPriority(left.pairType) -
+        this.getCompareJudgementPairPriority(right.pairType);
+      if (pairPriority !== 0) {
+        return pairPriority;
+      }
+
+      const confidencePriority =
+        this.getCompareJudgementConfidencePriority(left.confidence) -
+        this.getCompareJudgementConfidencePriority(right.confidence);
+      if (confidencePriority !== 0) {
+        return confidencePriority;
+      }
+
+      return left.pairLabel.localeCompare(right.pairLabel);
+    });
+
+    const pairHighlights: CompareInsightHighlight[] = sortedJudgements.slice(0, 4).map((judgement) => ({
+      pairKey: judgement.pairKey,
+      pairType: judgement.pairType,
+      pairLabel: judgement.pairLabel,
+      pairSignal: judgement.pairSignal,
+      verdict: judgement.verdict,
+      confidence: judgement.confidence,
+      analysis: judgement.analysis.trim(),
+    }));
+    const progressSummary = sortedJudgements.find((judgement) => judgement.pairType === 'targetBaseline');
+    const referenceGapSummary = sortedJudgements.find((judgement) => judgement.pairType === 'targetReference');
+    const promptChangeSummary = sortedJudgements.find((judgement) => judgement.pairType === 'referenceBaseline');
+    const stabilitySummary = sortedJudgements.find((judgement) => judgement.pairType === 'targetReplica');
+
+    const evidenceHighlights = this.collectRankedCompareStrings(
+      sortedJudgements.flatMap((judgement) => judgement.evidence),
+      6
+    );
+    const learnableSignals = this.collectRankedCompareStrings(
+      sortedJudgements.flatMap((judgement) => judgement.learnableSignals),
+      6
+    );
+    const overfitWarnings = this.collectRankedCompareStrings(
+      sortedJudgements.flatMap((judgement) => judgement.overfitWarnings),
+      6
+    );
+    const conflictSignals = this.buildCompareConflictSignals(sortedJudgements);
+
+    return {
+      pairHighlights,
+      ...(progressSummary ? { progressSummary: this.toCompareInsightHighlight(progressSummary) } : {}),
+      ...(referenceGapSummary ? { referenceGapSummary: this.toCompareInsightHighlight(referenceGapSummary) } : {}),
+      ...(promptChangeSummary ? { promptChangeSummary: this.toCompareInsightHighlight(promptChangeSummary) } : {}),
+      ...(stabilitySummary ? { stabilitySummary: this.toCompareInsightHighlight(stabilitySummary) } : {}),
+      ...(evidenceHighlights.length ? { evidenceHighlights } : {}),
+      ...(learnableSignals.length ? { learnableSignals } : {}),
+      ...(overfitWarnings.length ? { overfitWarnings } : {}),
+      ...(conflictSignals.length ? { conflictSignals } : {}),
+    };
+  }
+
+  private buildCompareConflictSignals(
+    compareJudgements: CompareJudgement[] | undefined
+  ): CompareConflictSignal[] {
+    if (!compareJudgements?.length) {
+      return [];
+    }
+
+    const signalSnapshot = this.summarizeStructuredCompareJudgeSignals(compareJudgements);
+    const hasOverfitWarnings = compareJudgements.some((item) => item.overfitWarnings.length > 0);
+    const conflictSignals: CompareConflictSignal[] = [];
+
+    if (
+      signalSnapshot.progress === 'improved' &&
+      signalSnapshot.promptValidity === 'unsupported'
+    ) {
+      conflictSignals.push('improvementNotSupportedOnReference');
+    }
+
+    if (
+      signalSnapshot.progress === 'improved' &&
+      signalSnapshot.stability === 'unstable'
+    ) {
+      conflictSignals.push('improvementUnstableAcrossReplicas');
+    }
+
+    if (signalSnapshot.progress === 'regressed') {
+      conflictSignals.push('regressionOutweighsCosmeticGains');
+    }
+
+    if (hasOverfitWarnings) {
+      conflictSignals.push('sampleOverfitRiskVisible');
+    }
+
+    return Array.from(new Set(conflictSignals));
+  }
+
+  private renderCompareConflictSignal(
+    signal: CompareConflictSignal,
+    language: ComparePromptLanguage
+  ): string {
+    switch (signal) {
+      case 'improvementNotSupportedOnReference':
+        return language === 'en'
+          ? 'The target improved over baseline, but the same prompt change is not supported on the reference side.'
+          : 'Target 相比 baseline 有进步，但同一类 prompt 改动在 reference 侧并未得到支持。';
+      case 'improvementUnstableAcrossReplicas':
+        return language === 'en'
+          ? 'The target improved in one comparison, but replica evidence suggests the gain may be unstable.'
+          : 'Target 在单组比较里有进步，但 replica 证据提示该收益可能不稳定。';
+      case 'regressionOutweighsCosmeticGains':
+        return language === 'en'
+          ? 'Regression against the baseline should outweigh cosmetic improvements elsewhere.'
+          : '相对 baseline 的回退应优先于其他表面优化。';
+      case 'sampleOverfitRiskVisible':
+        return language === 'en'
+          ? 'When reusable gains and sample-fitting gains coexist, prefer conservative conclusions and keep the overfit risk visible.'
+          : '如果“可复用收益”和“样例贴合收益”并存，应优先采用保守结论，并保持过拟合风险可见。';
+      default:
+        return signal;
+    }
+  }
+
+  private toCompareInsightHighlight(judgement: CompareJudgement): CompareInsightHighlight {
+    return {
+      pairKey: judgement.pairKey,
+      pairType: judgement.pairType,
+      pairLabel: judgement.pairLabel,
+      pairSignal: judgement.pairSignal,
+      verdict: judgement.verdict,
+      confidence: judgement.confidence,
+      analysis: judgement.analysis.trim(),
+    };
+  }
+
+  private getCompareJudgementPairPriority(pairType: CompareJudgementPairType): number {
+    switch (pairType) {
+      case 'targetBaseline':
+        return 0;
+      case 'targetReference':
+        return 1;
+      case 'referenceBaseline':
+        return 2;
+      case 'targetReplica':
+        return 3;
+      default:
+        return 99;
+    }
+  }
+
+  private getCompareJudgementConfidencePriority(confidence: CompareJudgement['confidence']): number {
+    switch (confidence) {
+      case 'high':
+        return 0;
+      case 'medium':
+        return 1;
+      case 'low':
+      default:
+        return 2;
+    }
+  }
+
+  private collectRankedCompareStrings(values: string[], limit: number): string[] {
+    const ranked = new Map<string, { text: string; count: number; firstIndex: number }>();
+
+    values.forEach((value, index) => {
+      const normalizedText = String(value || '').trim().replace(/\s+/g, ' ');
+      if (!normalizedText) {
+        return;
+      }
+
+      const key = normalizedText.toLowerCase();
+      const current = ranked.get(key);
+      if (current) {
+        current.count += 1;
+        return;
+      }
+
+      ranked.set(key, {
+        text: normalizedText,
+        count: 1,
+        firstIndex: index,
+      });
+    });
+
+    return Array.from(ranked.values())
+      .sort((left, right) => right.count - left.count || left.firstIndex - right.firstIndex)
+      .slice(0, limit)
+      .map((item) => item.text);
+  }
+
+  private summarizeStructuredCompareJudgeSignals(
+    judgeResults: CompareJudgement[] | undefined
+  ): StructuredCompareSignalSnapshot {
+    if (!judgeResults?.length) {
+      return {};
+    }
+
+    const progressJudge = judgeResults.find((item) => item.pairType === 'targetBaseline');
+    const gapJudge = judgeResults.find((item) => item.pairType === 'targetReference');
+    const promptValidityJudge = judgeResults.find((item) => item.pairType === 'referenceBaseline');
+    const stabilityJudges = judgeResults.filter((item) => item.pairType === 'targetReplica');
+
+    const stability = (() => {
+      if (!stabilityJudges.length) {
+        return undefined;
+      }
+      if (stabilityJudges.some((item) => item.pairSignal === 'unstable')) {
+        return 'unstable' as const;
+      }
+      if (stabilityJudges.every((item) => item.pairSignal === 'stable')) {
+        return 'stable' as const;
+      }
+      return 'unclear' as const;
+    })();
+
+    return {
+      progress:
+        progressJudge?.pairSignal === 'improved' ||
+        progressJudge?.pairSignal === 'flat' ||
+        progressJudge?.pairSignal === 'regressed' ||
+        progressJudge?.pairSignal === 'unclear'
+          ? progressJudge.pairSignal
+          : undefined,
+      gap:
+        gapJudge?.pairSignal === 'none' ||
+        gapJudge?.pairSignal === 'minor' ||
+        gapJudge?.pairSignal === 'major' ||
+        gapJudge?.pairSignal === 'unclear'
+          ? gapJudge.pairSignal
+          : undefined,
+      promptValidity:
+        promptValidityJudge?.pairSignal === 'supported' ||
+        promptValidityJudge?.pairSignal === 'mixed' ||
+        promptValidityJudge?.pairSignal === 'unsupported' ||
+        promptValidityJudge?.pairSignal === 'unclear'
+          ? promptValidityJudge.pairSignal
+          : undefined,
+      stability,
+    };
+  }
+
+  private deriveCompareStopSignalsFromJudgements(
+    judgeResults: CompareJudgement[] | undefined
+  ): CompareStopSignals | undefined {
+    if (!judgeResults?.length) {
+      return undefined;
+    }
+
+    const signalSnapshot = this.summarizeStructuredCompareJudgeSignals(judgeResults);
+    const hasOverfitWarnings = judgeResults.some((item) => item.overfitWarnings.length > 0);
+    const hasExplicitLowOverfitEvidence =
+      !hasOverfitWarnings &&
+      signalSnapshot.promptValidity === 'supported' &&
+      signalSnapshot.stability === 'stable';
+
+    const overfitRisk: CompareStopSignals['overfitRisk'] = (() => {
+      if (signalSnapshot.promptValidity === 'unsupported') {
+        return 'high';
+      }
+      if (signalSnapshot.stability === 'unstable' && hasOverfitWarnings) {
+        return 'high';
+      }
+      if (
+        signalSnapshot.promptValidity === 'mixed' ||
+        signalSnapshot.stability === 'unstable' ||
+        hasOverfitWarnings
+      ) {
+        return 'medium';
+      }
+      if (hasExplicitLowOverfitEvidence) {
+        return 'low';
+      }
+      return undefined;
+    })();
+
+    const improvementHeadroom: CompareStopSignals['improvementHeadroom'] = (() => {
+      if (signalSnapshot.progress === 'regressed') {
+        return 'high';
+      }
+      if (signalSnapshot.gap === 'major') {
+        return 'high';
+      }
+      if (signalSnapshot.gap === 'minor') {
+        return 'medium';
+      }
+      if (signalSnapshot.progress === 'flat') {
+        return signalSnapshot.gap === 'none' && overfitRisk === 'low'
+          ? 'low'
+          : 'medium';
+      }
+      if (
+        signalSnapshot.progress === 'improved' &&
+        signalSnapshot.gap === 'none' &&
+        overfitRisk === 'low' &&
+        signalSnapshot.promptValidity !== 'unsupported' &&
+        signalSnapshot.stability !== 'unstable'
+      ) {
+        return 'low';
+      }
+      return undefined;
+    })();
+
+    const stopRecommendation: CompareStopSignals['stopRecommendation'] = (() => {
+      if (signalSnapshot.progress === 'regressed' || overfitRisk === 'high') {
+        return 'review';
+      }
+      if (
+        (signalSnapshot.progress === 'improved' || signalSnapshot.progress === 'flat') &&
+        signalSnapshot.gap === 'none' &&
+        improvementHeadroom === 'low' &&
+        overfitRisk === 'low' &&
+        signalSnapshot.promptValidity !== 'unsupported' &&
+        signalSnapshot.stability !== 'unstable'
+      ) {
+        return 'stop';
+      }
+      if (
+        improvementHeadroom === 'medium' ||
+        improvementHeadroom === 'high' ||
+        signalSnapshot.gap === 'minor' ||
+        signalSnapshot.gap === 'major'
+      ) {
+        return 'continue';
+      }
+      return undefined;
+    })();
+
+    const stopReasons = this.collectRankedCompareStrings(
+      [
+        signalSnapshot.progress === 'regressed'
+          ? 'target regressed vs baseline'
+          : undefined,
+        signalSnapshot.gap === 'major'
+          ? 'major learnable gap remains vs reference'
+          : signalSnapshot.gap === 'minor'
+            ? 'minor learnable gap remains vs reference'
+            : undefined,
+        signalSnapshot.promptValidity === 'unsupported'
+          ? 'reference-side evidence does not support the prompt change'
+          : signalSnapshot.promptValidity === 'mixed'
+            ? 'reference-side evidence is mixed'
+            : undefined,
+        signalSnapshot.stability === 'unstable'
+          ? 'replica evidence suggests unstable behavior'
+          : undefined,
+        hasOverfitWarnings
+          ? 'pairwise judges flagged possible sample overfit'
+          : undefined,
+        stopRecommendation === 'stop'
+          ? 'little evidence for additional broad gains'
+          : undefined,
+      ].filter((item): item is string => !!item),
+      4
+    );
+
+    const stopSignals: CompareStopSignals = {
+      targetVsBaseline:
+        signalSnapshot.progress && signalSnapshot.progress !== 'unclear'
+          ? signalSnapshot.progress
+          : undefined,
+      targetVsReferenceGap:
+        signalSnapshot.gap && signalSnapshot.gap !== 'unclear'
+          ? signalSnapshot.gap
+          : undefined,
+      improvementHeadroom,
+      overfitRisk,
+      stopRecommendation,
+      stopReasons: stopReasons.length ? stopReasons : undefined,
+    };
+
+    return Object.values(stopSignals).some((item) =>
+      Array.isArray(item) ? item.length > 0 : item !== undefined
+    )
+      ? stopSignals
+      : undefined;
+  }
+
+  private mergeCompareStopSignals(
+    primary: CompareStopSignals | undefined,
+    fallback: CompareStopSignals | undefined
+  ): CompareStopSignals | undefined {
+    if (!primary) {
+      return fallback;
+    }
+    if (!fallback) {
+      return primary;
+    }
+
+    const merged: CompareStopSignals = {
+      targetVsBaseline: this.pickConservativeCompareTargetProgress(
+        primary.targetVsBaseline,
+        fallback.targetVsBaseline
+      ),
+      targetVsReferenceGap: this.pickConservativeCompareReferenceGap(
+        primary.targetVsReferenceGap,
+        fallback.targetVsReferenceGap
+      ),
+      improvementHeadroom: this.pickConservativeCompareHeadroom(
+        primary.improvementHeadroom,
+        fallback.improvementHeadroom
+      ),
+      overfitRisk: this.pickConservativeCompareOverfitRisk(
+        primary.overfitRisk,
+        fallback.overfitRisk
+      ),
+      stopRecommendation: this.pickConservativeCompareStopRecommendation(
+        primary.stopRecommendation,
+        fallback.stopRecommendation
+      ),
+      stopReasons: this.mergeCompareStopReasons(primary.stopReasons, fallback.stopReasons),
+    };
+
+    return Object.values(merged).some((item) =>
+      Array.isArray(item) ? item.length > 0 : item !== undefined
+    )
+      ? merged
+      : undefined;
+  }
+
+  private pickConservativeCompareTargetProgress(
+    left: CompareStopSignals['targetVsBaseline'],
+    right: CompareStopSignals['targetVsBaseline']
+  ): CompareStopSignals['targetVsBaseline'] {
+    const severity: Record<NonNullable<CompareStopSignals['targetVsBaseline']>, number> = {
+      improved: 0,
+      flat: 1,
+      regressed: 2,
+    };
+
+    return this.pickConservativeEnumValue(left, right, severity);
+  }
+
+  private pickConservativeCompareReferenceGap(
+    left: CompareStopSignals['targetVsReferenceGap'],
+    right: CompareStopSignals['targetVsReferenceGap']
+  ): CompareStopSignals['targetVsReferenceGap'] {
+    const severity: Record<NonNullable<CompareStopSignals['targetVsReferenceGap']>, number> = {
+      none: 0,
+      minor: 1,
+      major: 2,
+    };
+
+    return this.pickConservativeEnumValue(left, right, severity);
+  }
+
+  private pickConservativeCompareHeadroom(
+    left: CompareStopSignals['improvementHeadroom'],
+    right: CompareStopSignals['improvementHeadroom']
+  ): CompareStopSignals['improvementHeadroom'] {
+    const severity: Record<NonNullable<CompareStopSignals['improvementHeadroom']>, number> = {
+      none: 0,
+      low: 1,
+      medium: 2,
+      high: 3,
+    };
+
+    return this.pickConservativeEnumValue(left, right, severity);
+  }
+
+  private pickConservativeCompareOverfitRisk(
+    left: CompareStopSignals['overfitRisk'],
+    right: CompareStopSignals['overfitRisk']
+  ): CompareStopSignals['overfitRisk'] {
+    const severity: Record<NonNullable<CompareStopSignals['overfitRisk']>, number> = {
+      low: 0,
+      medium: 1,
+      high: 2,
+    };
+
+    return this.pickConservativeEnumValue(left, right, severity);
+  }
+
+  private pickConservativeCompareStopRecommendation(
+    left: CompareStopSignals['stopRecommendation'],
+    right: CompareStopSignals['stopRecommendation']
+  ): CompareStopSignals['stopRecommendation'] {
+    const severity: Record<NonNullable<CompareStopSignals['stopRecommendation']>, number> = {
+      stop: 0,
+      continue: 1,
+      review: 2,
+    };
+
+    return this.pickConservativeEnumValue(left, right, severity);
+  }
+
+  private pickConservativeEnumValue<T extends string>(
+    left: T | undefined,
+    right: T | undefined,
+    severity: Record<T, number>
+  ): T | undefined {
+    if (!left) {
+      return right;
+    }
+    if (!right) {
+      return left;
+    }
+
+    return severity[left] >= severity[right] ? left : right;
+  }
+
+  private mergeCompareStopReasons(
+    primary: CompareStopSignals['stopReasons'],
+    fallback: CompareStopSignals['stopReasons']
+  ): CompareStopSignals['stopReasons'] {
+    const mergedReasons = this.collectRankedCompareStrings(
+      [...(primary || []), ...(fallback || [])],
+      4
+    );
+
+    return mergedReasons.length ? mergedReasons : undefined;
   }
 
   private validateContentBlock(
@@ -352,7 +1277,7 @@ export class EvaluationService implements IEvaluationService {
     }
   }
 
-  private normalizeContentBlock(block?: EvaluationContentBlock): Record<string, unknown> | undefined {
+  private normalizeContentBlock(block?: EvaluationContentBlock): NormalizedContentBlock | undefined {
     const label = block?.label?.trim() || '';
     const content = block?.content?.trim() || '';
     if (!label || !content) {
@@ -387,17 +1312,17 @@ export class EvaluationService implements IEvaluationService {
       originalPrompt: referencePrompt,
       hasOriginalPrompt: !!referencePrompt,
       hasDesignContext: !!designContext,
-      designContextKind: (designContext?.kind as string) || '',
-      designContextLabel: (designContext?.label as string) || '',
-      designContextContent: (designContext?.content as string) || '',
-      designContextSummary: (designContext?.summary as string) || '',
-      designContextJson: (designContext?.content as string) || '',
+      designContextKind: designContext?.kind || '',
+      designContextLabel: designContext?.label || '',
+      designContextContent: designContext?.content || '',
+      designContextSummary: designContext?.summary || '',
+      designContextJson: designContext?.content || '',
       // 兼容旧模板中的 proContext 占位
-      proContext: (designContext?.content as string) || '',
+      proContext: designContext?.content || '',
     };
   }
 
-  private normalizeTestCase(testCase: EvaluationTestCase): Record<string, unknown> {
+  private normalizeTestCase(testCase: EvaluationTestCase): NormalizedEvaluationTestCase {
     const input = this.normalizeContentBlock(testCase.input)!;
     const label = testCase.label?.trim() || '';
     const settingsSummary = testCase.settingsSummary?.trim() || '';
@@ -418,9 +1343,10 @@ export class EvaluationService implements IEvaluationService {
 
   private normalizeSnapshot(
     snapshot: EvaluationSnapshot,
-    testCase: Record<string, unknown> | undefined,
-    workspacePrompt: string
-  ): Record<string, unknown> {
+    testCase: NormalizedEvaluationTestCase | undefined,
+    workspacePrompt: string,
+    structuredRole?: StructuredCompareRole
+  ): NormalizedEvaluationSnapshot {
     const executionInput = this.normalizeContentBlock(snapshot.executionInput);
     const executionInputLabel = (executionInput?.label || '') as string;
     const executionInputContent = (executionInput?.content || '') as string;
@@ -438,6 +1364,16 @@ export class EvaluationService implements IEvaluationService {
           ? `v${snapshot.promptRef.version}`
           : snapshot.promptRef.kind
       );
+    const roleLabel = structuredRole
+      ? ({
+          target: 'Target',
+          baseline: 'Baseline',
+          reference: 'Reference',
+          referenceBaseline: 'Reference Baseline',
+          replica: 'Replica',
+          auxiliary: 'Auxiliary',
+        } as const)[structuredRole]
+      : '';
 
     return {
       id: snapshot.id.trim(),
@@ -449,6 +1385,15 @@ export class EvaluationService implements IEvaluationService {
       hasDistinctPromptText: !promptMatchesWorkspace,
       promptRefKind: snapshot.promptRef.kind,
       promptRefLabel,
+      role: structuredRole || '',
+      roleLabel,
+      hasRole: !!structuredRole,
+      isTarget: structuredRole === 'target',
+      isBaseline: structuredRole === 'baseline',
+      isReference: structuredRole === 'reference',
+      isReferenceBaseline: structuredRole === 'referenceBaseline',
+      isReplica: structuredRole === 'replica',
+      isAuxiliary: structuredRole === 'auxiliary',
       modelKey,
       hasModelKey: !!modelKey,
       versionLabel,
@@ -505,71 +1450,40 @@ export class EvaluationService implements IEvaluationService {
 
   private buildCompareTemplateContext(
     baseContext: TemplateContext,
-    request: Extract<EvaluationRequest, { type: 'compare' }>
+    request: Extract<EvaluationRequest, { type: 'compare' }>,
+    normalizedCompare: NormalizedCompareContext
   ): TemplateContext {
     const targetContext = this.buildTargetContext(request.target);
-    const normalizedTestCases = request.testCases.map((testCase) => this.normalizeTestCase(testCase));
-    const normalizeTestCaseEvidenceKey = (testCase: Record<string, unknown>): string =>
-      JSON.stringify({
-        inputKind: (testCase['inputKind'] || '') as string,
-        inputLabel: (testCase['inputLabel'] || '') as string,
-        inputSummary: (testCase['inputSummary'] || '') as string,
-        inputContent: (testCase['inputContent'] || '') as string,
-        settingsSummary: (testCase['settingsSummary'] || '') as string,
-      });
-    const dedupedRenderedTestCases = Array.from(
-      normalizedTestCases.reduce((map, testCase) => {
-        const evidenceKey = normalizeTestCaseEvidenceKey(testCase);
-        if (!map.has(evidenceKey)) {
-          map.set(evidenceKey, testCase);
-        }
-        return map;
-      }, new Map<string, Record<string, unknown>>()).values()
-    );
-    const testCaseMap = new Map(normalizedTestCases.map((testCase) => [testCase.id as string, testCase]));
-    const normalizedSnapshots = request.snapshots.map((snapshot) =>
-      this.normalizeSnapshot(snapshot, testCaseMap.get(snapshot.testCaseId), request.target.workspacePrompt)
-    );
-    const samePromptAcrossSnapshots =
-      request.compareHints?.hasSamePromptSnapshots ??
-      (new Set(request.snapshots.map((snapshot) => snapshot.promptText.trim())).size === 1);
-    const sameTestCaseAcrossSnapshots =
-      request.compareHints?.hasSharedTestCases ??
-      (new Set(request.snapshots.map((snapshot) => snapshot.testCaseId.trim())).size === 1);
-    const sharedCompareInputs = sameTestCaseAcrossSnapshots || dedupedRenderedTestCases.length === 1;
-    const crossModelComparison =
-      request.compareHints?.hasCrossModelComparison ??
-      (
-        samePromptAcrossSnapshots &&
-        sharedCompareInputs &&
-        new Set(request.snapshots.map((snapshot) => (snapshot.modelKey || '').trim()).filter(Boolean)).size > 1
-      );
-    const hasEditableWorkspaceTarget = normalizedSnapshots.some(
-      (snapshot) => snapshot.promptRefKind === 'workspace' && snapshot.promptMatchesWorkspace
-    );
 
     return {
       ...baseContext,
       ...targetContext,
-      compareTestCaseCount: dedupedRenderedTestCases.length,
-      hasCompareTestCases: dedupedRenderedTestCases.length > 0,
-      compareTestCases: dedupedRenderedTestCases,
-      hasSharedCompareInputs: sharedCompareInputs,
-      sharedTestCaseCount: dedupedRenderedTestCases.length,
-      hasSharedTestCases: sharedCompareInputs && dedupedRenderedTestCases.length > 0,
-      sharedTestCases: dedupedRenderedTestCases,
-      compareSnapshotCount: normalizedSnapshots.length,
-      compareSnapshots: normalizedSnapshots,
-      hasCrossModelComparison: crossModelComparison,
-      hasEditableWorkspaceTarget,
+      compareMode: normalizedCompare.compareMode,
+      hasStructuredCompare: normalizedCompare.compareMode === 'structured',
+      hasCompareRoleBindings: normalizedCompare.compareRoleBindings.length > 0,
+      compareRoleBindings: normalizedCompare.compareRoleBindings,
+      compareTestCaseCount: normalizedCompare.renderedTestCases.length,
+      hasCompareTestCases: normalizedCompare.renderedTestCases.length > 0,
+      compareTestCases: normalizedCompare.renderedTestCases,
+      hasSharedCompareInputs: normalizedCompare.sharedCompareInputs,
+      sharedTestCaseCount: normalizedCompare.renderedTestCases.length,
+      hasSharedTestCases:
+        normalizedCompare.sharedCompareInputs && normalizedCompare.renderedTestCases.length > 0,
+      sharedTestCases: normalizedCompare.renderedTestCases,
+      compareSnapshotCount: normalizedCompare.normalizedSnapshots.length,
+      compareSnapshots: normalizedCompare.normalizedSnapshots,
+      hasCrossModelComparison: normalizedCompare.crossModelComparison,
+      hasEditableWorkspaceTarget: normalizedCompare.hasEditableWorkspaceTarget,
       compareHints: {
-        hasSharedTestCases: sharedCompareInputs,
-        hasSamePromptSnapshots: samePromptAcrossSnapshots,
-        hasCrossModelComparison: crossModelComparison,
+        mode: normalizedCompare.compareMode,
+        snapshotRoles: normalizedCompare.snapshotRoles,
+        hasSharedTestCases: normalizedCompare.sharedCompareInputs,
+        hasSamePromptSnapshots: normalizedCompare.samePromptAcrossSnapshots,
+        hasCrossModelComparison: normalizedCompare.crossModelComparison,
       },
       // 兼容旧 compare 模板字段
-      compareVariantCount: normalizedSnapshots.length,
-      compareVariants: normalizedSnapshots.map((snapshot) => ({
+      compareVariantCount: normalizedCompare.normalizedSnapshots.length,
+      compareVariants: normalizedCompare.normalizedSnapshots.map((snapshot) => ({
         id: snapshot.id,
         label: snapshot.label,
         prompt: snapshot.promptText,
@@ -591,13 +1505,1251 @@ export class EvaluationService implements IEvaluationService {
     };
   }
 
+  private normalizeCompareRequest(
+    request: Extract<EvaluationRequest, { type: 'compare' }>
+  ): NormalizedCompareContext {
+    const normalizedTestCases = request.testCases.map((testCase) => this.normalizeTestCase(testCase));
+    const renderedTestCases = Array.from(
+      normalizedTestCases.reduce((map, testCase) => {
+        const evidenceKey = this.buildCompareTestCaseEvidenceKey(testCase);
+        if (!map.has(evidenceKey)) {
+          map.set(evidenceKey, testCase);
+        }
+        return map;
+      }, new Map<string, NormalizedEvaluationTestCase>()).values()
+    );
+    const testCaseMap = new Map(normalizedTestCases.map((testCase) => [testCase.id, testCase]));
+    const rawSnapshotRoles = this.normalizeSnapshotRoles(
+      request.compareHints?.snapshotRoles,
+      request.snapshots
+    );
+    const snapshotsWithRoles = request.snapshots.map((snapshot) =>
+      this.normalizeSnapshot(
+        snapshot,
+        testCaseMap.get(snapshot.testCaseId.trim()),
+        request.target.workspacePrompt,
+        rawSnapshotRoles?.[snapshot.id.trim()]
+      )
+    );
+    const samePromptAcrossSnapshots =
+      request.compareHints?.hasSamePromptSnapshots ??
+      (new Set(request.snapshots.map((snapshot) => snapshot.promptText.trim())).size === 1);
+    const sameTestCaseAcrossSnapshots =
+      request.compareHints?.hasSharedTestCases ??
+      (new Set(request.snapshots.map((snapshot) => snapshot.testCaseId.trim())).size === 1);
+    const sharedCompareInputs = sameTestCaseAcrossSnapshots || renderedTestCases.length === 1;
+    const crossModelComparison =
+      request.compareHints?.hasCrossModelComparison ??
+      (
+        samePromptAcrossSnapshots &&
+        sharedCompareInputs &&
+        new Set(
+          request.snapshots
+            .map((snapshot) => (snapshot.modelKey || '').trim())
+            .filter(Boolean)
+        ).size > 1
+      );
+    const requestedStructured = request.compareHints?.mode === 'structured';
+    const hasStructuredRoleConflicts = this.hasStructuredSingletonRoleConflicts(rawSnapshotRoles);
+    const provisionalJudgePlan = requestedStructured && !hasStructuredRoleConflicts
+      ? this.buildStructuredCompareJudgePlan(snapshotsWithRoles)
+      : [];
+    const compareMode =
+      requestedStructured && !hasStructuredRoleConflicts && provisionalJudgePlan.length > 0
+        ? 'structured'
+        : 'generic';
+    const snapshotRoles = compareMode === 'structured' ? rawSnapshotRoles : undefined;
+    const normalizedSnapshots =
+      compareMode === 'structured'
+        ? snapshotsWithRoles
+        : request.snapshots.map((snapshot) =>
+            this.normalizeSnapshot(
+              snapshot,
+              testCaseMap.get(snapshot.testCaseId.trim()),
+              request.target.workspacePrompt
+            )
+          );
+    const compareRoleBindings =
+      compareMode === 'structured'
+        ? normalizedSnapshots
+            .filter((snapshot) => snapshot.hasRole)
+            .map((snapshot) => ({
+              snapshotId: snapshot.id,
+              snapshotLabel: snapshot.label,
+              role: snapshot.role as StructuredCompareRole,
+              roleLabel: snapshot.roleLabel,
+            }))
+        : [];
+    const hasEditableWorkspaceTarget = normalizedSnapshots.some(
+      (snapshot) => snapshot.promptRefKind === 'workspace' && snapshot.promptMatchesWorkspace
+    );
+
+    return {
+      compareMode,
+      snapshotRoles,
+      normalizedTestCases,
+      renderedTestCases,
+      testCaseMap,
+      normalizedSnapshots,
+      compareRoleBindings,
+      samePromptAcrossSnapshots,
+      sharedCompareInputs,
+      crossModelComparison,
+      hasEditableWorkspaceTarget,
+      judgePlan:
+        compareMode === 'structured'
+          ? this.buildStructuredCompareJudgePlan(normalizedSnapshots)
+          : [],
+    };
+  }
+
+  private buildCompareTestCaseEvidenceKey(
+    testCase: NormalizedEvaluationTestCase | undefined
+  ): string {
+    return JSON.stringify({
+      inputKind: testCase?.inputKind || '',
+      inputLabel: testCase?.inputLabel || '',
+      inputSummary: testCase?.inputSummary || '',
+      inputContent: testCase?.inputContent || '',
+      settingsSummary: testCase?.settingsSummary || '',
+    });
+  }
+
+  private buildStructuredCompareJudgePlan(
+    snapshots: NormalizedEvaluationSnapshot[]
+  ): StructuredCompareJudgePlanItem[] {
+    const target = snapshots.find((snapshot) => snapshot.role === 'target');
+    if (!target) {
+      return [];
+    }
+
+    const baseline = snapshots.find((snapshot) => snapshot.role === 'baseline');
+    const reference = snapshots.find((snapshot) => snapshot.role === 'reference');
+    const referenceBaseline = snapshots.find(
+      (snapshot) => snapshot.role === 'referenceBaseline'
+    );
+    const replicas = snapshots.filter((snapshot) => snapshot.role === 'replica');
+    const judgePlan: StructuredCompareJudgePlanItem[] = [];
+
+    if (baseline) {
+      judgePlan.push({
+        key: 'target-vs-baseline',
+        pairType: 'targetBaseline',
+        label: 'Target vs Baseline',
+        purpose:
+          'Decide whether the current target prompt materially improved, stayed flat, or regressed relative to the previous version.',
+        signalName: 'progress',
+        allowedSignals: ['improved', 'flat', 'regressed', 'unclear'],
+        left: target,
+        right: baseline,
+      });
+    }
+
+    if (reference) {
+      judgePlan.push({
+        key: 'target-vs-reference',
+        pairType: 'targetReference',
+        label: 'Target vs Reference',
+        purpose:
+          'Identify whether the target still has a learnable gap from the stronger/reference run, and what structural strategy is worth learning.',
+        signalName: 'gap',
+        allowedSignals: ['none', 'minor', 'major', 'unclear'],
+        left: target,
+        right: reference,
+      });
+    }
+
+    if (reference && referenceBaseline) {
+      judgePlan.push({
+        key: 'reference-vs-reference-baseline',
+        pairType: 'referenceBaseline',
+        label: 'Reference vs Reference Baseline',
+        purpose:
+          'Judge whether the prompt change itself is supported on the reference side, instead of being a target-only coincidence.',
+        signalName: 'promptValidity',
+        allowedSignals: ['supported', 'mixed', 'unsupported', 'unclear'],
+        left: reference,
+        right: referenceBaseline,
+      });
+    }
+
+    replicas.forEach((replica, index) => {
+      judgePlan.push({
+        key: index === 0 ? 'target-vs-replica' : `target-vs-replica-${index + 1}`,
+        pairType: 'targetReplica',
+        label: index === 0 ? 'Target vs Replica' : `Target vs Replica #${index + 1}`,
+        purpose:
+          'Judge whether the target prompt behaves stably across repeated executions instead of improving by chance.',
+        signalName: 'stability',
+        allowedSignals: ['stable', 'unstable', 'unclear'],
+        left: target,
+        right: replica,
+      });
+    });
+
+    return judgePlan;
+  }
+
+  private async evaluateStructuredCompare(
+    request: Extract<EvaluationRequest, { type: 'compare' }>,
+    normalizedCompare: NormalizedCompareContext
+  ): Promise<EvaluationResponse> {
+    const startTime = Date.now();
+
+    try {
+      const language = await this.resolveComparePromptLanguage();
+      const subject = this.resolveComparePromptSubjectConfig(request.mode, language);
+      const judgeResults = await this.executeStructuredCompareJudgePlan(
+        request,
+        normalizedCompare,
+        language
+      );
+      const synthesisMessages = this.buildStructuredCompareSynthesisMessages(
+        request,
+        normalizedCompare,
+        judgeResults,
+        language,
+        subject
+      );
+      const synthesisResult = await this.llmService.sendMessage(
+        synthesisMessages,
+        request.evaluationModelKey
+      );
+      const duration = Date.now() - startTime;
+      const responseMetadata = this.buildResponseMetadata(
+        request,
+        {
+          model: request.evaluationModelKey,
+          timestamp: Date.now(),
+          duration,
+          compareJudgements: judgeResults,
+        },
+        normalizedCompare
+      );
+
+      return this.parseEvaluationResult(synthesisResult, request.type, responseMetadata);
+    } catch (error) {
+      throw new EvaluationExecutionError(
+        error instanceof Error ? error.message : String(error),
+        error instanceof Error ? error : undefined
+      );
+    }
+  }
+
+  private async evaluateStructuredCompareStream(
+    request: Extract<EvaluationRequest, { type: 'compare' }>,
+    normalizedCompare: NormalizedCompareContext,
+    callbacks: EvaluationStreamHandlers
+  ): Promise<void> {
+    const startTime = Date.now();
+    const language = await this.resolveComparePromptLanguage();
+    const subject = this.resolveComparePromptSubjectConfig(request.mode, language);
+
+    try {
+      const judgeResults = await this.executeStructuredCompareJudgePlan(
+        request,
+        normalizedCompare,
+        language,
+        (message) => callbacks.onToken(message)
+      );
+      callbacks.onToken(
+        language === 'en'
+          ? '\n[Structured Compare] Synthesizing final evaluation...\n'
+          : '\n[Structured Compare] 正在综合最终评估...\n'
+      );
+
+      const synthesisMessages = this.buildStructuredCompareSynthesisMessages(
+        request,
+        normalizedCompare,
+        judgeResults,
+        language,
+        subject
+      );
+
+      let fullContent = '';
+      await this.llmService.sendMessageStream(synthesisMessages, request.evaluationModelKey, {
+        onToken: (token) => {
+          fullContent += token;
+          callbacks.onToken(token);
+        },
+        onComplete: () => {
+          try {
+            const duration = Date.now() - startTime;
+            const response = this.parseEvaluationResult(
+              fullContent,
+              request.type,
+              this.buildResponseMetadata(
+                request,
+                {
+                  model: request.evaluationModelKey,
+                  timestamp: Date.now(),
+                  duration,
+                  compareJudgements: judgeResults,
+                },
+                normalizedCompare
+              )
+            );
+            callbacks.onComplete(response);
+          } catch (error) {
+            callbacks.onError(error instanceof Error ? error : new Error(String(error)));
+          }
+        },
+        onError: (error) => {
+          callbacks.onError(new EvaluationExecutionError(error.message, error));
+        },
+      });
+    } catch (error) {
+      callbacks.onError(
+        new EvaluationExecutionError(
+          error instanceof Error ? error.message : String(error),
+          error instanceof Error ? error : undefined
+        )
+      );
+    }
+  }
+
+  private async executeStructuredCompareJudgePlan(
+    request: Extract<EvaluationRequest, { type: 'compare' }>,
+    normalizedCompare: NormalizedCompareContext,
+    language: ComparePromptLanguage,
+    onProgress?: (message: string) => void
+  ): Promise<StructuredCompareJudgeResult[]> {
+    const judgeTasks = normalizedCompare.judgePlan.map(async (planItem, index) => {
+      onProgress?.(
+        language === 'en'
+          ? `\n[Structured Compare] Starting pairwise judge ${index + 1}/${normalizedCompare.judgePlan.length}: ${planItem.label}\n`
+          : `\n[Structured Compare] 已启动成对判断 ${index + 1}/${normalizedCompare.judgePlan.length}：${planItem.label}\n`
+      );
+      const messages = this.buildStructuredCompareJudgeMessages(
+        request,
+        normalizedCompare,
+        planItem,
+        language
+      );
+      const judgeContent = await this.llmService.sendMessage(messages, request.evaluationModelKey);
+      const parsed = this.parseStructuredCompareJudgeResult(judgeContent, planItem);
+      onProgress?.(
+        language === 'en'
+          ? `[Structured Compare] Pairwise judge finished: ${planItem.label}\n`
+          : `[Structured Compare] 成对判断完成：${planItem.label}\n`
+      );
+      return parsed;
+    });
+
+    return Promise.all(judgeTasks);
+  }
+
+  private async resolveComparePromptLanguage(): Promise<ComparePromptLanguage> {
+    try {
+      const language = await this.templateManager.getCurrentBuiltinTemplateLanguage();
+      return language === 'en-US' ? 'en' : 'zh';
+    } catch {
+      return 'zh';
+    }
+  }
+
+  private resolveComparePromptSubjectConfig(
+    mode: EvaluationModeConfig,
+    language: ComparePromptLanguage
+  ): ComparePromptSubjectConfig {
+    if (language === 'en') {
+      if (mode.functionMode === 'basic' && mode.subMode === 'system') {
+        return {
+          subjectLabel: 'system prompt',
+          roleName: 'Structured System Prompt Compare Synthesizer',
+        };
+      }
+      if (mode.functionMode === 'basic') {
+        return {
+          subjectLabel: 'user prompt',
+          roleName: 'Structured User Prompt Compare Synthesizer',
+        };
+      }
+      if (mode.functionMode === 'pro' && mode.subMode === 'multi') {
+        return {
+          subjectLabel: 'conversation prompt',
+          roleName: 'Structured Conversation Prompt Compare Synthesizer',
+        };
+      }
+      if (mode.functionMode === 'pro') {
+        return {
+          subjectLabel: 'variable prompt',
+          roleName: 'Structured Variable Prompt Compare Synthesizer',
+        };
+      }
+      return {
+        subjectLabel: 'workspace prompt',
+        roleName: 'Structured Prompt Compare Synthesizer',
+      };
+    }
+
+    if (mode.functionMode === 'basic' && mode.subMode === 'system') {
+      return {
+        subjectLabel: '系统提示词',
+        roleName: '结构化系统提示词对比综合专家',
+      };
+    }
+    if (mode.functionMode === 'basic') {
+      return {
+        subjectLabel: '用户提示词',
+        roleName: '结构化用户提示词对比综合专家',
+      };
+    }
+    if (mode.functionMode === 'pro' && mode.subMode === 'multi') {
+      return {
+        subjectLabel: '上下文消息提示词',
+        roleName: '结构化上下文消息对比综合专家',
+      };
+    }
+    if (mode.functionMode === 'pro') {
+      return {
+        subjectLabel: '变量提示词',
+        roleName: '结构化变量提示词对比综合专家',
+      };
+    }
+    return {
+      subjectLabel: '工作区提示词',
+      roleName: '结构化提示词对比综合专家',
+    };
+  }
+
+  private buildStructuredCompareJudgeMessages(
+    request: Extract<EvaluationRequest, { type: 'compare' }>,
+    normalizedCompare: NormalizedCompareContext,
+    planItem: StructuredCompareJudgePlanItem,
+    language: ComparePromptLanguage
+  ): Message[] {
+    const relevantTestCases = Array.from(
+      [planItem.left.testCaseId, planItem.right.testCaseId].reduce((map, testCaseId) => {
+        const testCase = normalizedCompare.testCaseMap.get(testCaseId);
+        if (testCase) {
+          map.set(this.buildCompareTestCaseEvidenceKey(testCase), testCase);
+        }
+        return map;
+      }, new Map<string, NormalizedEvaluationTestCase>()).values()
+    );
+    const focus = request.focus?.content?.trim() || '';
+    void this.buildStructuredCompareDebugArtifacts({
+      roleBindings: normalizedCompare.compareRoleBindings,
+      testCases: relevantTestCases,
+      snapshots: [planItem.left, planItem.right],
+      language,
+    });
+
+    return buildStructuredComparePairJudgeMessages({
+      language,
+      pairGuidance: this.renderStructuredComparePairGuidance(planItem, language),
+      payload: {
+        scenario: {
+          language,
+          pairKey: planItem.key,
+          pairType: planItem.pairType,
+          pairLabel: planItem.label,
+          purpose: planItem.purpose,
+          signalName: planItem.signalName,
+          allowedSignalValues: planItem.allowedSignals,
+          ...(focus ? { focusBrief: focus } : {}),
+        },
+        roleBindings: this.toStructuredCompareRoleBindingPayloads(
+          normalizedCompare.compareRoleBindings
+        ),
+        testCases: relevantTestCases.map((testCase) =>
+          this.toStructuredCompareTestCasePayload(testCase)
+        ),
+        leftSnapshot: this.toStructuredCompareSnapshotPayload(planItem.left),
+        rightSnapshot: this.toStructuredCompareSnapshotPayload(planItem.right),
+      },
+    });
+  }
+
+  private renderStructuredComparePairGuidance(
+    planItem: StructuredCompareJudgePlanItem,
+    language: ComparePromptLanguage
+  ): string {
+    if (language === 'en') {
+      switch (planItem.pairType) {
+        case 'targetBaseline':
+          return [
+            '- This pair decides whether the current target is actually worth keeping instead of the previous version.',
+            '- Do not reward cosmetic rewrites, longer wording, or more confident tone if task completion, boundary control, or required structure got weaker.',
+            '- If the target is genuinely more helpful on this sample but the gain mainly comes from sample-tied wording, keywords, or one-off rules, prefer pairSignal=improved or flat first, then expose the fragility in overfitWarnings instead of defaulting to unclear.',
+            '- Only use unclear when you truly cannot determine the direction after weighing both sides, not merely because overfit risk exists.',
+          ].join('\n');
+        case 'targetReference':
+          return [
+            '- This pair is for learnable gap analysis, not raw model worship.',
+            '- Separate transferable prompt-side structure from differences that mainly look like model ceiling or raw reasoning ability.',
+            '- Only use "major" when the reference shows a clear structural advantage that the target could realistically learn from.',
+            '- If your evidence says the reference missed a required action or violated the prompt-side rule while the target followed it, do not still conclude "right-better". Downgrade or flip the verdict so it matches the evidence.',
+          ].join('\n');
+        case 'referenceBaseline':
+          return [
+            '- This pair checks whether the prompt change itself is supported on the reference side.',
+            '- Prefer "supported" only when the newer reference-side prompt clearly improves in the same direction as the target-side gain.',
+            '- If the reference side does not support the change, call that out explicitly because it raises overfit risk for the target-side improvement.',
+          ].join('\n');
+        case 'targetReplica':
+          return [
+            '- This pair checks stability across repeated executions with the same target prompt.',
+            '- Treat requirement-preserving variation as acceptable, but mark "unstable" when key boundaries, task structure, or output intent drift across runs.',
+            '- If one run obeys an explicit output-only contract and another adds prose, markdown, code fences, renamed fields, extra keys, or wrapper text, that is instability rather than harmless variation.',
+            '- Do not confuse one lucky output with reliable stability.',
+          ].join('\n');
+        default:
+          return '- Judge only the provided pair and keep the conclusion conservative.';
+      }
+    }
+
+    switch (planItem.pairType) {
+      case 'targetBaseline':
+        return [
+          '- 这一组决定当前 target 是否真的值得替换上一版本，而不是只看起来更“像优化版”。',
+          '- 如果 left 只是写得更长、语气更强或表面更完整，但任务完成度、边界控制或关键结构更差，不能判成 left-better。',
+          '- 如果 target 在当前样例下确实更有帮助，但收益主要来自样例关键词、一次性规则或特定触发条件，优先先判断 pairSignal=improved 或 flat，再把脆弱性写进 overfitWarnings，不要直接因为有过拟合风险就退成 unclear。',
+          '- 只有在你综合两侧后仍无法判断方向时，才允许写 unclear；“存在过拟合风险”本身不等于“没有方向”。',
+        ].join('\n');
+      case 'targetReference':
+        return [
+          '- 这一组是为了找“可学习差距”，不是为了盲目崇拜更强模型。',
+          '- 要区分“可迁移的提示词结构优势”和“纯模型能力上限”造成的差异。',
+          '- 只有当 reference 展示出 target 可以现实学习的清晰结构优势时，才应给出 major。',
+          '- 如果 evidence 已经表明 reference 漏掉了必须动作、没遵守 prompt 规则，而 target 做到了，就不能继续写成 right-better；结论必须和证据一致。',
+        ].join('\n');
+      case 'referenceBaseline':
+        return [
+          '- 这一组用于判断 prompt 改动本身是否也在 reference 侧成立。',
+          '- 只有当 reference 新版本在方向上明确支撑 target 侧收益时，才应给出 supported。',
+          '- 如果 reference 侧并不支持这次改动，要明确指出，因为这会抬高 target 侧收益只是样例拟合的风险。',
+        ].join('\n');
+      case 'targetReplica':
+        return [
+          '- 这一组用于判断同一个 target prompt 在重复执行下是否稳定。',
+          '- 如果只是措辞波动但仍满足同样边界与任务要求，可视为稳定；如果关键边界、结构或输出意图飘移，应判为 unstable。',
+          '- 如果一次执行严格满足 output-only 约束，而另一次多出解释、Markdown、code fence、字段改名、额外键或包裹文本，这属于不稳定，不是无害波动。',
+          '- 不要把一次走运的输出误判成稳定收益。',
+        ].join('\n');
+      default:
+        return '- 只判断当前这一组 pair，并保持结论保守。';
+    }
+  }
+
+  private buildStructuredCompareSynthesisMessages(
+    request: Extract<EvaluationRequest, { type: 'compare' }>,
+    normalizedCompare: NormalizedCompareContext,
+    judgeResults: StructuredCompareJudgeResult[],
+    language: ComparePromptLanguage,
+    subject: ComparePromptSubjectConfig
+  ): Message[] {
+    const focus = request.focus?.content?.trim() || '';
+    const signalSnapshot = this.summarizeStructuredCompareJudgeSignals(judgeResults);
+    const derivedStopSignals = this.deriveCompareStopSignalsFromJudgements(judgeResults);
+    const learnableSignals = this.collectRankedCompareStrings(
+      judgeResults.flatMap((item) => item.learnableSignals),
+      4
+    );
+    const overfitWarnings = this.collectRankedCompareStrings(
+      judgeResults.flatMap((item) => item.overfitWarnings),
+      4
+    );
+    const conflictSignals = this.buildCompareConflictSignals(judgeResults).map((signal) => ({
+      key: signal,
+      description: this.renderCompareConflictSignal(signal, language),
+    }));
+    void this.buildStructuredCompareDebugArtifacts({
+      roleBindings: normalizedCompare.compareRoleBindings,
+      testCases: normalizedCompare.renderedTestCases,
+      snapshots: normalizedCompare.normalizedSnapshots,
+      judgeResults,
+      language,
+    });
+
+    return buildStructuredCompareSynthesisMessages({
+      language,
+      payload: {
+        scenario: {
+          language,
+          roleName: subject.roleName,
+          subjectLabel: subject.subjectLabel,
+          sharedCompareInputs: normalizedCompare.sharedCompareInputs,
+          samePromptAcrossSnapshots: normalizedCompare.samePromptAcrossSnapshots,
+          crossModelComparison: normalizedCompare.crossModelComparison,
+          ...(focus ? { focusBrief: focus } : {}),
+        },
+        roleBindings: this.toStructuredCompareRoleBindingPayloads(
+          normalizedCompare.compareRoleBindings
+        ),
+        deterministicHints: {
+          priorityOrder: [
+            'targetBaseline',
+            'targetReference',
+            'referenceBaseline',
+            'targetReplica',
+          ],
+          signalSnapshot: {
+            ...(signalSnapshot.progress ? { progress: signalSnapshot.progress } : {}),
+            ...(signalSnapshot.gap ? { gap: signalSnapshot.gap } : {}),
+            ...(signalSnapshot.promptValidity ? { promptValidity: signalSnapshot.promptValidity } : {}),
+            ...(signalSnapshot.stability ? { stability: signalSnapshot.stability } : {}),
+          },
+          ...(derivedStopSignals ? { derivedStopSignals } : {}),
+          learnableSignals,
+          overfitWarnings,
+          conflictSignals,
+        },
+        judgeResults: judgeResults.map((item) => ({
+          pairKey: item.pairKey,
+          pairType: item.pairType,
+          pairLabel: item.pairLabel,
+          leftSnapshotId: item.leftSnapshotId,
+          leftSnapshotLabel: item.leftSnapshotLabel,
+          ...(item.leftRole ? { leftRole: item.leftRole } : {}),
+          rightSnapshotId: item.rightSnapshotId,
+          rightSnapshotLabel: item.rightSnapshotLabel,
+          ...(item.rightRole ? { rightRole: item.rightRole } : {}),
+          verdict: item.verdict,
+          winner: item.winner,
+          confidence: item.confidence,
+          pairSignal: item.pairSignal,
+          analysis: item.analysis,
+          evidence: item.evidence,
+          learnableSignals: item.learnableSignals,
+          overfitWarnings: item.overfitWarnings,
+        })),
+      },
+    });
+  }
+
+  private buildStructuredCompareDebugArtifacts(params: {
+    roleBindings: StructuredCompareRoleBinding[];
+    testCases: NormalizedEvaluationTestCase[];
+    snapshots: NormalizedEvaluationSnapshot[];
+    judgeResults?: StructuredCompareJudgeResult[];
+    language: ComparePromptLanguage;
+  }): {
+    roleBindingsMarkdown: string;
+    testCasesMarkdown: string;
+    snapshotsMarkdown: string[];
+    judgeResultsMarkdown?: string;
+    synthesisHintsMarkdown?: string;
+  } {
+    return {
+      roleBindingsMarkdown: this.renderStructuredCompareRoleBindings(
+        params.roleBindings,
+        params.language
+      ),
+      testCasesMarkdown: this.renderStructuredCompareTestCases(
+        params.testCases,
+        params.language
+      ),
+      snapshotsMarkdown: params.snapshots.map((snapshot) =>
+        this.renderStructuredCompareSnapshot(snapshot, params.language)
+      ),
+      ...(params.judgeResults
+        ? {
+            judgeResultsMarkdown: this.renderStructuredCompareJudgeResults(
+              params.judgeResults,
+              params.language
+            ),
+            synthesisHintsMarkdown: this.renderStructuredCompareSynthesisHints(
+              params.judgeResults,
+              params.language
+            ),
+          }
+        : {}),
+    };
+  }
+
+  private toStructuredCompareRoleBindingPayloads(
+    roleBindings: StructuredCompareRoleBinding[]
+  ): Array<{
+    snapshotId: string;
+    snapshotLabel: string;
+    role: string;
+    roleLabel: string;
+  }> {
+    return roleBindings.map((binding) => ({
+      snapshotId: binding.snapshotId,
+      snapshotLabel: binding.snapshotLabel,
+      role: binding.role,
+      roleLabel: binding.roleLabel,
+    }));
+  }
+
+  private toStructuredCompareTestCasePayload(
+    testCase: NormalizedEvaluationTestCase
+  ): {
+    id: string;
+    label?: string;
+    input: {
+      kind: string;
+      label: string;
+      content: string;
+      summary?: string;
+    };
+    settingsSummary?: string;
+  } {
+    return {
+      id: testCase.id,
+      ...(testCase.hasLabel ? { label: testCase.label } : {}),
+      input: {
+        kind: testCase.inputKind,
+        label: testCase.inputLabel,
+        content: testCase.inputContent,
+        ...(testCase.hasInputSummary ? { summary: testCase.inputSummary } : {}),
+      },
+      ...(testCase.hasSettingsSummary ? { settingsSummary: testCase.settingsSummary } : {}),
+    };
+  }
+
+  private toStructuredCompareSnapshotPayload(
+    snapshot: NormalizedEvaluationSnapshot
+  ): {
+    id: string;
+    label: string;
+    role?: string;
+    roleLabel?: string;
+    testCaseId: string;
+    testCaseLabel?: string;
+    promptRef: {
+      kind: string;
+      label: string;
+    };
+    promptText: string;
+    modelKey?: string;
+    versionLabel?: string;
+    output: string;
+    reasoning?: string;
+    executionInput?: {
+      kind: string;
+      label: string;
+      content: string;
+      summary?: string;
+    };
+  } {
+    return {
+      id: snapshot.id,
+      label: snapshot.label,
+      ...(snapshot.hasRole ? { role: snapshot.role, roleLabel: snapshot.roleLabel } : {}),
+      testCaseId: snapshot.testCaseId,
+      ...(snapshot.testCaseLabel ? { testCaseLabel: snapshot.testCaseLabel } : {}),
+      promptRef: {
+        kind: snapshot.promptRefKind,
+        label: snapshot.promptRefLabel,
+      },
+      promptText: snapshot.promptText,
+      ...(snapshot.hasModelKey ? { modelKey: snapshot.modelKey } : {}),
+      ...(snapshot.hasVersionLabel ? { versionLabel: snapshot.versionLabel } : {}),
+      output: snapshot.output,
+      ...(snapshot.hasReasoning ? { reasoning: snapshot.reasoning } : {}),
+      ...(snapshot.hasExecutionInput
+        ? {
+            executionInput: {
+              kind: 'custom',
+              label: snapshot.executionInputLabel,
+              content: snapshot.executionInputContent,
+              ...(snapshot.hasExecutionInputSummary
+                ? { summary: snapshot.executionInputSummary }
+                : {}),
+            },
+          }
+        : {}),
+    };
+  }
+
+  private renderStructuredCompareSynthesisHints(
+    judgeResults: StructuredCompareJudgeResult[],
+    language: ComparePromptLanguage
+  ): string {
+    if (!judgeResults.length) {
+      return '';
+    }
+
+    const signalSnapshot = this.summarizeStructuredCompareJudgeSignals(judgeResults);
+    const derivedStopSignals = this.deriveCompareStopSignalsFromJudgements(judgeResults);
+    const learnableSignals = this.collectRankedCompareStrings(
+      judgeResults.flatMap((item) => item.learnableSignals),
+      4
+    );
+    const overfitWarnings = this.collectRankedCompareStrings(
+      judgeResults.flatMap((item) => item.overfitWarnings),
+      4
+    );
+    const conflictChecks = this.buildCompareConflictSignals(judgeResults)
+      .map((signal) => this.renderCompareConflictSignal(signal, language));
+
+    const signalLines = [
+      language === 'en'
+        ? `- Progress Signal: ${signalSnapshot.progress || 'n/a'}`
+        : `- Progress Signal：${signalSnapshot.progress || 'n/a'}`,
+      language === 'en'
+        ? `- Reference Gap Signal: ${signalSnapshot.gap || 'n/a'}`
+        : `- Reference Gap Signal：${signalSnapshot.gap || 'n/a'}`,
+      language === 'en'
+        ? `- Prompt Validity Signal: ${signalSnapshot.promptValidity || 'n/a'}`
+        : `- Prompt Validity Signal：${signalSnapshot.promptValidity || 'n/a'}`,
+      language === 'en'
+        ? `- Stability Signal: ${signalSnapshot.stability || 'n/a'}`
+        : `- Stability Signal：${signalSnapshot.stability || 'n/a'}`,
+      language === 'en'
+        ? `- Derived Stop Recommendation: ${derivedStopSignals?.stopRecommendation || 'n/a'}`
+        : `- Derived Stop Recommendation：${derivedStopSignals?.stopRecommendation || 'n/a'}`,
+    ];
+
+    const learnableSection =
+      learnableSignals.length > 0
+        ? learnableSignals.map((item) => `- ${item}`).join('\n')
+        : language === 'en'
+          ? '- none'
+          : '- 无';
+    const overfitSection =
+      overfitWarnings.length > 0
+        ? overfitWarnings.map((item) => `- ${item}`).join('\n')
+        : language === 'en'
+          ? '- none'
+          : '- 无';
+    const conflictSection =
+      conflictChecks.length > 0
+        ? conflictChecks.map((item) => `- ${item}`).join('\n')
+        : language === 'en'
+          ? '- none'
+          : '- 无';
+
+    return language === 'en'
+      ? `## Deterministic Synthesis Hints
+- Priority Order: targetBaseline > targetReference > referenceBaseline > targetReplica
+${signalLines.join('\n')}
+
+### Reusable Signal Candidates
+${learnableSection}
+
+### Overfit / Risk Candidates
+${overfitSection}
+
+### Conflict Checks
+${conflictSection}
+
+`
+      : `## 综合提示（确定性）
+- Priority Order：targetBaseline > targetReference > referenceBaseline > targetReplica
+${signalLines.join('\n')}
+
+### 可复用信号候选
+${learnableSection}
+
+### 过拟合 / 风险候选
+${overfitSection}
+
+### 冲突检查
+${conflictSection}
+
+`;
+  }
+
+  private parseStructuredCompareJudgeResult(
+    content: string,
+    planItem: StructuredCompareJudgePlanItem
+  ): StructuredCompareJudgeResult {
+    const fallback: StructuredCompareJudgeResult = {
+      pairKey: planItem.key,
+      pairType: planItem.pairType,
+      pairLabel: planItem.label,
+      leftSnapshotId: planItem.left.id,
+      leftSnapshotLabel: planItem.left.label,
+      leftRole: planItem.left.role || undefined,
+      rightSnapshotId: planItem.right.id,
+      rightSnapshotLabel: planItem.right.label,
+      rightRole: planItem.right.role || undefined,
+      verdict: 'mixed',
+      winner: 'none',
+      confidence: 'low',
+      pairSignal: 'unclear',
+      analysis: content.trim().slice(0, 4000),
+      evidence: [],
+      learnableSignals: [],
+      overfitWarnings: [],
+    };
+
+    for (const candidate of this.extractJsonCandidates(content)) {
+      try {
+        const parsed = JSON.parse(jsonrepair(candidate));
+        const payload = this.findStructuredCompareJudgePayload(parsed);
+        if (!payload) {
+          continue;
+        }
+
+        const payloadVerdict =
+          typeof payload.verdict === 'string' ? payload.verdict.trim() : undefined;
+        const payloadPairSignal =
+          typeof payload.pairSignal === 'string' ? payload.pairSignal.trim() : undefined;
+        const pairSignal =
+          payloadPairSignal && planItem.allowedSignals.includes(payloadPairSignal)
+            ? payloadPairSignal
+            : payloadVerdict && planItem.allowedSignals.includes(payloadVerdict)
+              ? payloadVerdict
+              : fallback.pairSignal;
+        const verdict = this.normalizeStructuredCompareJudgeVerdict(
+          payloadVerdict,
+          pairSignal,
+          planItem
+        );
+        const winner = this.normalizeStructuredCompareJudgeWinner(
+          typeof payload.winner === 'string' ? payload.winner.trim() : undefined,
+          verdict,
+          pairSignal,
+          planItem
+        );
+        const confidence =
+          payload.confidence === 'low' ||
+          payload.confidence === 'medium' ||
+          payload.confidence === 'high'
+            ? payload.confidence
+            : fallback.confidence;
+
+        return {
+          // Pair identity is determined by the judge plan, not by model echo fields.
+          pairKey: planItem.key,
+          pairType: planItem.pairType,
+          pairLabel: planItem.label,
+          leftSnapshotId: planItem.left.id,
+          leftSnapshotLabel: planItem.left.label,
+          leftRole: planItem.left.role || undefined,
+          rightSnapshotId: planItem.right.id,
+          rightSnapshotLabel: planItem.right.label,
+          rightRole: planItem.right.role || undefined,
+          verdict,
+          winner,
+          confidence,
+          pairSignal,
+          analysis:
+            typeof payload.analysis === 'string' && payload.analysis.trim()
+              ? payload.analysis.trim()
+              : fallback.analysis,
+          evidence: Array.isArray(payload.evidence)
+            ? payload.evidence
+                .map((item: unknown) => String(item || '').trim())
+                .filter(Boolean)
+                .slice(0, 4)
+            : [],
+          learnableSignals: Array.isArray(payload.learnableSignals)
+            ? payload.learnableSignals
+                .map((item: unknown) => String(item || '').trim())
+                .filter(Boolean)
+                .slice(0, 4)
+            : [],
+          overfitWarnings: Array.isArray(payload.overfitWarnings)
+            ? payload.overfitWarnings
+                .map((item: unknown) => String(item || '').trim())
+                .filter(Boolean)
+                .slice(0, 4)
+            : [],
+        };
+      } catch {
+        continue;
+      }
+    }
+
+    return fallback;
+  }
+
+  private normalizeStructuredCompareJudgeVerdict(
+    rawVerdict: string | undefined,
+    pairSignal: string,
+    planItem: StructuredCompareJudgePlanItem
+  ): StructuredCompareJudgeResult['verdict'] {
+    if (
+      rawVerdict === 'left-better' ||
+      rawVerdict === 'right-better' ||
+      rawVerdict === 'mixed' ||
+      rawVerdict === 'similar'
+    ) {
+      return rawVerdict;
+    }
+
+    switch (planItem.pairType) {
+      case 'targetBaseline':
+        if (pairSignal === 'improved') return 'left-better';
+        if (pairSignal === 'regressed') return 'right-better';
+        if (pairSignal === 'flat') return 'similar';
+        return 'mixed';
+      case 'targetReference':
+        if (pairSignal === 'minor' || pairSignal === 'major') return 'right-better';
+        if (pairSignal === 'none') return 'similar';
+        return 'mixed';
+      case 'referenceBaseline':
+        if (pairSignal === 'supported') return 'left-better';
+        if (pairSignal === 'unsupported') return 'right-better';
+        return 'mixed';
+      case 'targetReplica':
+        if (pairSignal === 'stable') return 'similar';
+        return 'mixed';
+      default:
+        return 'mixed';
+    }
+  }
+
+  private normalizeStructuredCompareJudgeWinner(
+    rawWinner: string | undefined,
+    verdict: StructuredCompareJudgeResult['verdict'],
+    pairSignal: string,
+    planItem: StructuredCompareJudgePlanItem
+  ): StructuredCompareJudgeResult['winner'] {
+    if (rawWinner === 'left' || rawWinner === 'right' || rawWinner === 'none') {
+      return rawWinner;
+    }
+
+    if (verdict === 'left-better') {
+      return 'left';
+    }
+    if (verdict === 'right-better') {
+      return 'right';
+    }
+    if (verdict === 'similar') {
+      return 'none';
+    }
+
+    if (planItem.pairType === 'targetReplica' && pairSignal === 'stable') {
+      return 'none';
+    }
+
+    return 'none';
+  }
+
+  private findStructuredCompareJudgePayload(
+    value: unknown
+  ): Record<string, unknown> | null {
+    const visited = new Set<unknown>();
+    const queue: unknown[] = [value];
+
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (!current || typeof current !== 'object') {
+        continue;
+      }
+      if (visited.has(current)) {
+        continue;
+      }
+      visited.add(current);
+
+      const record = current as Record<string, unknown>;
+      if (this.isStructuredCompareJudgePayloadCandidate(record)) {
+        return record;
+      }
+
+      for (const item of Object.values(record)) {
+        if (item && typeof item === 'object') {
+          queue.push(item);
+        }
+      }
+    }
+
+    return null;
+  }
+
+  private isStructuredCompareJudgePayloadCandidate(
+    record: Record<string, unknown>
+  ): boolean {
+    const hasCoreVerdict =
+      typeof record.verdict === 'string' &&
+      (
+        record.verdict === 'left-better' ||
+        record.verdict === 'right-better' ||
+        record.verdict === 'mixed' ||
+        record.verdict === 'similar'
+      );
+    const hasCoreWinner =
+      typeof record.winner === 'string' &&
+      (record.winner === 'left' || record.winner === 'right' || record.winner === 'none');
+    const hasCoreConfidence =
+      typeof record.confidence === 'string' &&
+      (record.confidence === 'low' || record.confidence === 'medium' || record.confidence === 'high');
+    const hasCorePairSignal = typeof record.pairSignal === 'string';
+    const hasSupportingField =
+      hasCorePairSignal ||
+      typeof record.analysis === 'string' ||
+      Array.isArray(record.evidence) ||
+      Array.isArray(record.learnableSignals) ||
+      Array.isArray(record.overfitWarnings);
+
+    return (hasCoreVerdict || hasCorePairSignal) && hasCoreWinner && hasCoreConfidence && hasSupportingField;
+  }
+
+  private renderStructuredCompareRoleBindings(
+    roleBindings: StructuredCompareRoleBinding[],
+    language: ComparePromptLanguage
+  ): string {
+    if (!roleBindings.length) {
+      return '';
+    }
+
+    const lines = roleBindings.map(
+      (binding) =>
+        language === 'en'
+          ? `- Snapshot ${binding.snapshotLabel} (${binding.snapshotId}): ${binding.roleLabel}`
+          : `- 快照 ${binding.snapshotLabel}（${binding.snapshotId}）：${binding.roleLabel}`
+    );
+
+    return language === 'en'
+      ? `## Structured Compare Roles
+${lines.join('\n')}
+
+`
+      : `## Structured Compare 角色
+${lines.join('\n')}
+
+`;
+  }
+
+  private renderStructuredCompareTestCases(
+    testCases: NormalizedEvaluationTestCase[],
+    language: ComparePromptLanguage
+  ): string {
+    if (!testCases.length) {
+      return '';
+    }
+
+    const header =
+      language === 'en'
+        ? `## Relevant Test Cases (${testCases.length})`
+        : `## 相关测试用例（${testCases.length}）`;
+    const sections = testCases.map((testCase) => {
+      if (language === 'en') {
+        return `### Test Case ${testCase.hasLabel ? testCase.label : testCase.id}
+#### Input (${testCase.inputLabel})
+${testCase.hasInputSummary ? `${testCase.inputSummary}\n` : ''}${testCase.inputContent}
+${testCase.hasSettingsSummary ? `\n#### Settings\n${testCase.settingsSummary}` : ''}`;
+      }
+
+      return `### 测试用例 ${testCase.hasLabel ? testCase.label : testCase.id}
+#### 输入（${testCase.inputLabel}）
+${testCase.hasInputSummary ? `${testCase.inputSummary}\n` : ''}${testCase.inputContent}
+${testCase.hasSettingsSummary ? `\n#### 设置\n${testCase.settingsSummary}` : ''}`;
+    });
+
+    return `${header}
+${sections.join('\n\n')}
+
+`;
+  }
+
+  private renderStructuredCompareSnapshot(
+    snapshot: NormalizedEvaluationSnapshot,
+    language: ComparePromptLanguage
+  ): string {
+    const lines = [
+      language === 'en' ? `- Snapshot: ${snapshot.label}` : `- 快照：${snapshot.label}`,
+    ];
+
+    if (snapshot.hasRole) {
+      lines.push(
+        language === 'en'
+          ? `- Compare Role: ${snapshot.roleLabel}`
+          : `- 对比角色：${snapshot.roleLabel}`
+      );
+    }
+    lines.push(
+      language === 'en'
+        ? `- Prompt Source: ${snapshot.promptRefLabel}`
+        : `- 提示词来源：${snapshot.promptRefLabel}`
+    );
+    if (snapshot.hasModelKey) {
+      lines.push(
+        language === 'en' ? `- Model: ${snapshot.modelKey}` : `- 模型：${snapshot.modelKey}`
+      );
+    }
+    if (snapshot.hasVersionLabel) {
+      lines.push(
+        language === 'en'
+          ? `- Version: ${snapshot.versionLabel}`
+          : `- 版本：${snapshot.versionLabel}`
+      );
+    }
+
+    return `${lines.join('\n')}
+${language === 'en' ? '#### Executed Prompt' : '#### 执行提示词'}
+${snapshot.promptText}
+${snapshot.hasExecutionInput
+  ? `\n\n${language === 'en' ? `#### Additional Execution Input (${snapshot.executionInputLabel})` : `#### 额外执行输入（${snapshot.executionInputLabel}）`}
+${snapshot.hasExecutionInputSummary ? `${snapshot.executionInputSummary}\n` : ''}${snapshot.executionInputContent}`
+  : ''}
+
+${language === 'en' ? '#### Output' : '#### 输出'}
+${snapshot.output}${snapshot.hasReasoning ? `\n\n${language === 'en' ? '#### Reasoning' : '#### 推理'}\n${snapshot.reasoning}` : ''}`;
+  }
+
+  private renderStructuredCompareJudgeResults(
+    judgeResults: StructuredCompareJudgeResult[],
+    language: ComparePromptLanguage
+  ): string {
+    const header =
+      language === 'en'
+        ? `## Pairwise Judge Results (${judgeResults.length})`
+        : `## 成对判断结果（${judgeResults.length}）`;
+    const sections = judgeResults.map((result, index) => {
+      const evidenceLines =
+        result.evidence.length > 0
+          ? result.evidence.map((item) => `- ${item}`).join('\n')
+          : language === 'en'
+            ? '- none'
+            : '- 无';
+      const signalLines =
+        result.learnableSignals.length > 0
+          ? result.learnableSignals.map((item) => `- ${item}`).join('\n')
+          : language === 'en'
+            ? '- none'
+            : '- 无';
+      const overfitLines =
+        result.overfitWarnings.length > 0
+          ? result.overfitWarnings.map((item) => `- ${item}`).join('\n')
+          : language === 'en'
+            ? '- none'
+            : '- 无';
+
+      return language === 'en'
+        ? `### Result ${index + 1}
+- Pair Key: ${result.pairKey}
+- Pair Type: ${result.pairType}
+- Verdict: ${result.verdict}
+- Winner: ${result.winner}
+- Confidence: ${result.confidence}
+- Pair Signal: ${result.pairSignal}
+#### Analysis
+${result.analysis}
+#### Evidence
+${evidenceLines}
+#### Learnable Signals
+${signalLines}
+#### Overfit Warnings
+${overfitLines}`
+        : `### 结果 ${index + 1}
+- Pair Key：${result.pairKey}
+- Pair Type：${result.pairType}
+- Verdict：${result.verdict}
+- Winner：${result.winner}
+- Confidence：${result.confidence}
+- Pair Signal：${result.pairSignal}
+#### Analysis
+${result.analysis}
+#### Evidence
+${evidenceLines}
+#### Learnable Signals
+${signalLines}
+#### Overfit Warnings
+${overfitLines}`;
+    });
+
+    return `${header}
+${sections.join('\n\n')}
+
+`;
+  }
+
   /**
    * 解析评估结果
    */
   private parseEvaluationResult(
     content: string,
     type: EvaluationType,
-    metadata?: { model?: string; timestamp?: number; duration?: number }
+    metadata?: EvaluationResponse['metadata']
   ): EvaluationResponse {
     const findEvaluationPayload = (value: unknown): unknown | null => {
       // 允许模型返回 "{ evaluation: {...} }" / "{ data: {...} }" 之类包装结构。
@@ -807,7 +2959,7 @@ export class EvaluationService implements IEvaluationService {
   private normalizeEvaluationResponse(
     data: any,
     type: EvaluationType,
-    metadata?: { model?: string; timestamp?: number; duration?: number }
+    metadata?: EvaluationResponse['metadata']
   ): EvaluationResponse {
     if (!data || typeof data !== 'object') {
       throw new EvaluationParseError('Evaluation result is not a valid object.');
@@ -949,13 +3101,53 @@ export class EvaluationService implements IEvaluationService {
 
     const summary = typeof data.summary === 'string' ? data.summary : '';
 
+    const responseMetadataRaw =
+      (data.metadata && typeof data.metadata === 'object' && !Array.isArray(data.metadata))
+        ? data.metadata
+        : {};
+    const parsedCompareMode =
+      responseMetadataRaw.compareMode === 'structured' || responseMetadataRaw.compareMode === 'generic'
+        ? responseMetadataRaw.compareMode
+        : (
+            data.compareMode === 'structured' || data.compareMode === 'generic'
+              ? data.compareMode
+              : undefined
+          );
+    const parsedCompareStopSignals = this.normalizeCompareStopSignals(
+      responseMetadataRaw.compareStopSignals ?? data.compareStopSignals
+    );
+    const parsedCompareJudgements = this.normalizeCompareJudgements(
+      metadata?.compareJudgements ?? responseMetadataRaw.compareJudgements ?? data.compareJudgements
+    );
+    const finalMetadata: NonNullable<EvaluationResponse['metadata']> = {
+      ...(parsedCompareMode ? { compareMode: parsedCompareMode } : {}),
+      ...(parsedCompareStopSignals ? { compareStopSignals: parsedCompareStopSignals } : {}),
+      ...metadata,
+      ...(parsedCompareJudgements ? { compareJudgements: parsedCompareJudgements } : {}),
+    };
+    const derivedCompareStopSignals = this.deriveCompareStopSignalsFromJudgements(
+      finalMetadata.compareJudgements
+    );
+    const mergedCompareStopSignals = this.mergeCompareStopSignals(
+      finalMetadata.compareStopSignals,
+      derivedCompareStopSignals
+    );
+    if (mergedCompareStopSignals) {
+      finalMetadata.compareStopSignals = mergedCompareStopSignals;
+    }
+    const compareInsights = this.buildCompareInsights(finalMetadata.compareJudgements);
+
+    if (compareInsights) {
+      finalMetadata.compareInsights = compareInsights;
+    }
+
     return {
       type,
       score,
       improvements,
       summary,
       patchPlan,
-      metadata,
+      metadata: finalMetadata,
     };
   }
 
@@ -965,7 +3157,7 @@ export class EvaluationService implements IEvaluationService {
   private parseTextEvaluation(
     content: string,
     type: EvaluationType,
-    metadata?: { model?: string; timestamp?: number; duration?: number }
+    metadata?: EvaluationResponse['metadata']
   ): EvaluationResponse | null {
     const scorePatterns = [
       // JSON 残片里常见的 overall 字段

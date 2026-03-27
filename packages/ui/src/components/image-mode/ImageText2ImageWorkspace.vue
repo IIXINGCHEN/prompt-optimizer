@@ -42,7 +42,6 @@
                             :loading="isExtractingFromImage"
                             @click="openExtractImagePicker"
                             :disabled="
-                                isAnalyzing ||
                                 isExtractingFromImage ||
                                 isOptimizing
                             "
@@ -101,7 +100,6 @@
                                 :loading="isExtractingFromImage"
                                 @click="openExtractImagePicker"
                                 :disabled="
-                                    isAnalyzing ||
                                     isExtractingFromImage ||
                                     isOptimizing
                                 "
@@ -324,30 +322,9 @@
                             </NSpace>
                         </NGridItem>
 
-                        <!-- 分析与优化按钮 -->
+                        <!-- 优化按钮 -->
                         <NGridItem :span="6" :xs="24" :sm="6" class="flex items-end justify-end">
                             <NSpace :size="8">
-                                <!-- 分析按钮（与优化同级） -->
-                                <NButton
-                                    type="default"
-                                    size="medium"
-                                    data-testid="image-text2image-analyze-button"
-                                    :loading="isAnalyzing"
-                                    @click="handleAnalyze"
-                                    :disabled="
-                                        isAnalyzing ||
-                                        isExtractingFromImage ||
-                                        isOptimizing ||
-                                        !originalPrompt.trim()
-                                    "
-                                >
-                                    {{
-                                        isAnalyzing
-                                            ? t('promptOptimizer.analyzing')
-                                            : t('promptOptimizer.analyze')
-                                    }}
-                                </NButton>
-                                <!-- 优化按钮 -->
                                 <NButton
                                     type="primary"
                                     size="medium"
@@ -355,7 +332,6 @@
                                     :loading="isOptimizing"
                                     @click="handleOptimizePrompt"
                                     :disabled="
-                                        isAnalyzing ||
                                         isExtractingFromImage ||
                                         isOptimizing ||
                                         !originalPrompt.trim() ||
@@ -473,70 +449,68 @@
                     <NCard size="small" :style="{ flexShrink: 0 }">
                         <div class="variant-deck" :style="{ gridTemplateColumns: testGridTemplateColumns }">
                             <div v-for="id in activeVariantIds" :key="id" class="variant-cell">
-                                <div class="variant-cell__controls">
-                                    <NTag size="small" :bordered="false" class="variant-cell__label">
-                                        {{ getVariantLabel(id) }}
-                                    </NTag>
-                                    <NTag
-                                        v-if="isVariantStale(id)"
-                                        size="small"
-                                        type="warning"
-                                        :bordered="false"
-                                        class="variant-cell__stale"
-                                    >
-                                        {{ t('test.layout.stale') }}
-                                    </NTag>
-
-                                    <NSelect
-                                        :value="variantVersionModels[id].value"
-                                        :options="versionOptions"
-                                        size="small"
-                                        :disabled="variantRunning[id]"
-                                        :data-testid="getVariantVersionTestId(id)"
-                                        @update:value="(value) => { variantVersionModels[id].value = value }"
-                                        style="width: 92px"
-                                    />
-
-                                    <div class="variant-cell__model">
-                                        <SelectWithConfig
-                                            :data-testid="getVariantModelTestId(id)"
-                                            :model-value="variantModelKeyModels[id].value"
-                                            @update:model-value="(value) => { variantModelKeyModels[id].value = String(value ?? '') }"
-                                            :options="imageModelOptions"
-                                            :getPrimary="OptionAccessors.getPrimary"
-                                            :getSecondary="OptionAccessors.getSecondary"
-                                            :getValue="OptionAccessors.getValue"
-                                            :placeholder="t('imageWorkspace.generation.imageModelPlaceholder')"
-                                            size="small"
-                                            :disabled="variantRunning[id]"
-                                            filterable
-                                            :show-config-action="!!appOpenModelManager"
-                                            :show-empty-config-c-t-a="true"
-                                            @config="() => appOpenModelManager && appOpenModelManager('image')"
-                                            style="min-width: 0; width: 100%;"
-                                        />
+                                <div
+                                    class="variant-cell__controls"
+                                    :class="{ 'variant-cell__controls--stacked': useStackedVariantControls }"
+                                >
+                                    <div class="variant-cell__meta">
+                                        <NTag size="small" :bordered="false" class="variant-cell__label">
+                                            {{ getVariantLabel(id) }}
+                                        </NTag>
                                     </div>
 
-                                    <NTooltip trigger="hover">
-                                        <template #trigger>
-                                                 <NButton
-                                                     type="primary"
-                                                     size="small"
-                                                     circle
-                                                     :loading="variantRunning[id]"
-                                                     :disabled="variantRunning[id]"
-                                                     @click="() => runVariant(id)"
-                                                     :data-testid="getVariantRunTestId(id)"
-                                                 >
-                                                <template #icon>
-                                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
-                                                        <path d="M8 5v14l11-7z" />
-                                                    </svg>
-                                                </template>
-                                            </NButton>
-                                        </template>
-                                        {{ t('test.layout.runThisColumn') }}
-                                    </NTooltip>
+                                    <div class="variant-cell__actions">
+                                        <TestPanelVersionSelect
+                                            :value="variantVersionModels[id].value"
+                                            :options="versionOptions"
+                                            :disabled="variantRunning[id]"
+                                            :test-id="getVariantVersionTestId(id)"
+                                            @update:value="(value) => { variantVersionModels[id].value = value as TestPanelVersionValue }"
+                                        />
+
+                                        <div class="variant-cell__model">
+                                            <SelectWithConfig
+                                                :data-testid="getVariantModelTestId(id)"
+                                                :model-value="variantModelKeyModels[id].value"
+                                                @update:model-value="(value) => { variantModelKeyModels[id].value = String(value ?? '') }"
+                                                :options="imageModelOptions"
+                                                :getPrimary="OptionAccessors.getPrimary"
+                                                :getSecondary="OptionAccessors.getSecondary"
+                                                :getValue="OptionAccessors.getValue"
+                                                :placeholder="t('imageWorkspace.generation.imageModelPlaceholder')"
+                                                size="small"
+                                                :disabled="variantRunning[id]"
+                                                filterable
+                                                :show-config-action="!!appOpenModelManager"
+                                                :show-empty-config-c-t-a="true"
+                                                @config="() => appOpenModelManager && appOpenModelManager('image')"
+                                                style="min-width: 0; width: 100%;"
+                                            />
+                                        </div>
+
+                                        <div class="variant-cell__run">
+                                            <NTooltip trigger="hover">
+                                                <template #trigger>
+                                                    <NButton
+                                                        type="primary"
+                                                        size="small"
+                                                        circle
+                                                        :loading="variantRunning[id]"
+                                                        :disabled="variantRunning[id]"
+                                                        @click="() => runVariant(id)"
+                                                        :data-testid="getVariantRunTestId(id)"
+                                                    >
+                                                    <template #icon>
+                                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
+                                                            <path d="M8 5v14l11-7z" />
+                                                        </svg>
+                                                    </template>
+                                                </NButton>
+                                            </template>
+                                                {{ t('test.layout.runThisColumn') }}
+                                            </NTooltip>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -669,22 +643,6 @@
             @confirm="confirmBatchApply"
         />
 
-        <EvaluationPanel
-            v-model:show="evaluation.isPanelVisible.value"
-            :is-evaluating="panelProps.isEvaluating"
-            :result="panelProps.result"
-            :stream-content="panelProps.streamContent"
-            :error="panelProps.error"
-            :current-type="panelProps.currentType"
-            :score-level="panelProps.scoreLevel"
-            @re-evaluate="evaluationHandler.handleReEvaluate"
-            @evaluate-with-feedback="handleEvaluateActiveWithFeedback"
-            @apply-local-patch="handleApplyPatch"
-            @apply-improvement="handleApplyImprovement"
-            @clear="handleClearEvaluation"
-            @retry="evaluationHandler.handleReEvaluate"
-        />
-
         <!-- 子模式本地预览面板：不再依赖 PromptOptimizerApp 的全局预览状态 -->
         <PromptPreviewPanel
             v-model:show="showPromptPreview"
@@ -701,7 +659,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, inject, ref, reactive, computed, watch, nextTick, toRef, type Ref } from 'vue'
+import { onMounted, onUnmounted, inject, ref, reactive, computed, watch, nextTick, type Ref } from 'vue'
 
 import {
     NCard,
@@ -716,7 +674,6 @@ import {
     NGridItem,
     NIcon,
     NTag,
-    NSelect,
     NRadioGroup,
     NRadioButton,
     NTooltip,
@@ -725,8 +682,7 @@ import { useI18n } from "vue-i18n";
 import PromptPanelUI from "../PromptPanel.vue";
 import PromptPreviewPanel from "../PromptPreviewPanel.vue";
 import SelectWithConfig from "../SelectWithConfig.vue";
-import { EvaluationPanel } from '../evaluation'
-import { provideEvaluation } from '../../composables/prompt/useEvaluationContext';
+import TestPanelVersionSelect from '../TestPanelVersionSelect.vue'
 import { useLocalPromptPreviewPanel } from '../../composables/prompt/useLocalPromptPreviewPanel'
 import { OptionAccessors } from "../../utils/data-transformer";
 import type { AppServices } from "../../types/services";
@@ -753,6 +709,10 @@ import {
     hashVariables,
 } from '../../utils/prompt-variables'
 import {
+    buildTestPanelVersionOptions,
+    resolveTestPanelVersionSelection,
+} from '../../utils/testPanelVersion'
+import {
     useImageText2ImageSession,
     type TestColumnCount,
     type TestPanelVersionValue,
@@ -761,13 +721,11 @@ import {
 } from '../../stores/session/useImageText2ImageSession'
 import { useImageGeneration } from '../../composables/image/useImageGeneration'
 import ImageTokenUsage from './ImageTokenUsage.vue'
-import { useEvaluationHandler } from '../../composables/prompt/useEvaluationHandler'
 import { useFunctionModelManager } from '../../composables/model'
 import { useWorkspaceTemplateSelection } from '../../composables/workspaces/useWorkspaceTemplateSelection'
 import { useWorkspaceTextModelSelection } from '../../composables/workspaces/useWorkspaceTextModelSelection'
 import { useElementSize } from '@vueuse/core'
 import {
-    applyPatchOperationsToText,
     type ContextMode,
     type ImageModelConfig,
     type Text2ImageRequest,
@@ -777,7 +735,6 @@ import {
     type OptimizationRequest,
     type PromptRecordChain,
     type PromptRecordType,
-    type PatchOperation,
     type Template,
     type TextModelConfig,
 } from '@prompt-optimizer/core'
@@ -1149,6 +1106,7 @@ const ALL_VARIANT_IDS: TestVariantId[] = ['a', 'b', 'c', 'd']
 const activeVariantIds = computed<TestVariantId[]>(() =>
     ALL_VARIANT_IDS.slice(0, testColumnCountModel.value),
 )
+const useStackedVariantControls = computed(() => activeVariantIds.value.length >= 2)
 
 const variantVersionModels = {
     a: variantAVersionModel,
@@ -1181,21 +1139,23 @@ const testGridTemplateColumns = computed(
     () => `repeat(${testColumnCountModel.value}, minmax(0, 1fr))`,
 )
 
-// 版本选项：默认显示“工作区”与“原始(v0)”；若存在历史版本，则额外显示 v1..vn。
+const getTestPanelVersionLabels = () => ({
+    workspace: t('test.layout.workspace'),
+    previous: t('test.layout.previous'),
+    original: t('test.layout.original'),
+})
+
+// 版本选项：默认显示“工作区”与“原始(v0)”；存在可用上一版时显示“上一版(vN)”动态别名。
 const versionOptions = computed(() => {
-    const versions = currentVersions.value || []
-
-    const sortedVersions = versions
-        .map((v) => v.version)
-        .filter((v): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 1)
-        .slice()
-        .sort((a, b) => a - b)
-
-    return [
-        { label: t('test.layout.workspace'), value: 'workspace' },
-        { label: t('test.layout.original'), value: 0 },
-        ...sortedVersions.map((v) => ({ label: `v${v}`, value: v })),
-    ]
+    return buildTestPanelVersionOptions(
+        currentVersions.value || [],
+        getTestPanelVersionLabels(),
+        {
+            currentVersionId: currentVersionId.value,
+            workspacePrompt: optimizedPrompt.value || '',
+            originalPrompt: originalPrompt.value || '',
+        },
+    )
 })
 
 // 确保测试列的模型选择始终有效（模型列表变化时自动 fallback）
@@ -1222,24 +1182,18 @@ watch(
 type ResolvedPrompt = { text: string; resolvedVersion: number }
 
 const resolvePromptForSelection = (selection: TestPanelVersionValue): ResolvedPrompt => {
-    const v0 = originalPrompt.value || ''
-    const workspace = optimizedPrompt.value || ''
-    const versions = currentVersions.value || []
+    const resolved = resolveTestPanelVersionSelection({
+        selection,
+        versions: currentVersions.value || [],
+        currentVersionId: currentVersionId.value,
+        workspacePrompt: optimizedPrompt.value || '',
+        originalPrompt: originalPrompt.value || '',
+    })
 
-    if (selection === 'workspace') {
-        return { text: workspace, resolvedVersion: -1 }
+    return {
+        text: resolved.text,
+        resolvedVersion: resolved.resolvedVersion,
     }
-
-    if (selection === 0) {
-        return { text: v0, resolvedVersion: 0 }
-    }
-
-    const target = versions.find((v) => v.version === selection)
-    if (target) {
-        return { text: target.optimizedPrompt || '', resolvedVersion: target.version }
-    }
-
-    return { text: '', resolvedVersion: -1 }
 }
 
 // 注意：Pinia setup store 会把 ref 自动解包；直接赋值会丢失响应性。
@@ -1480,43 +1434,6 @@ const runAllVariants = async () => {
     }
 }
 
-// 评估处理器（图像模式专用：testResults 不参与）
-const evaluationHandler = useEvaluationHandler({
-    services,
-    analysisOptimizedPrompt: optimizedPrompt,
-    evaluationModelKey: selectedTextModelKey,
-    functionMode: computed(() => 'image'),
-    subMode: computed(() => 'text2image'),
-    persistedResults: toRef(session, 'evaluationResults'),
-})
-
-// 提供评估上下文给 PromptPanel（子模式私有；结果持久化在 session store）
-provideEvaluation(evaluationHandler.evaluation)
-
-const { evaluation } = evaluationHandler
-const panelProps = evaluationHandler.panelProps
-
-const handleEvaluateActiveWithFeedback = async (payload: { feedback: string }) => {
-    await evaluationHandler.handleEvaluateActiveWithFeedback(payload.feedback)
-}
-
-const handleApplyImprovement = (payload: { improvement: string }) => {
-    evaluation.closePanel()
-    promptPanelRef.value?.openIterateDialog?.(payload.improvement)
-}
-
-const handleApplyPatch = (payload: { operation: PatchOperation }) => {
-    if (!payload.operation) return
-    const current = optimizedPrompt.value || ''
-    const result = applyPatchOperationsToText(current, payload.operation)
-    if (!result.ok) {
-        toast.warning(t('toast.warning.patchApplyFailed'))
-        return
-    }
-    optimizedPrompt.value = result.text
-    toast.success(t('evaluation.diagnose.applyFix'))
-}
-
 // 保存本地编辑
 const handleSaveLocalEdit = async (payload: { note?: string }) => {
     if (!historyManager.value) {
@@ -1594,11 +1511,6 @@ const handleSaveLocalEdit = async (payload: { note?: string }) => {
     }
 }
 
-const handleClearEvaluation = () => {
-    evaluation.closePanel()
-    evaluation.clearAllResults()
-}
-
 // PromptPanel 引用，用于在语言切换后刷新迭代模板选择
 const promptPanelRef = ref<InstanceType<typeof PromptPanelUI> | null>(null);
 
@@ -1613,9 +1525,6 @@ const promptSummary = computed(() => {
         : originalPrompt.value;
 });
 
-/** 是否正在执行分析 */
-const isAnalyzing = ref(false);
-
 const resetExtractedPromptArtifacts = () => {
     currentChainId.value = ''
     currentVersions.value = []
@@ -1628,8 +1537,6 @@ const resetExtractedPromptArtifacts = () => {
         versionId: '',
     })
 
-    evaluationHandler.evaluation.clearResult('prompt-only')
-    evaluationHandler.evaluation.clearResult('prompt-iterate')
 }
 
 const readImageFileAsBase64 = (file: File): Promise<{ base64: string; mimeType: string }> =>
@@ -1651,57 +1558,6 @@ const readImageFileAsBase64 = (file: File): Promise<{ base64: string; mimeType: 
 
         reader.readAsDataURL(file)
     })
-
-/**
- * 处理分析操作
- */
-const handleAnalyze = async () => {
-    if (!originalPrompt.value?.trim()) return;
-    if (isOptimizing.value) return;
-
-    isAnalyzing.value = true;
-
-    // 1. 清空版本链，创建虚拟 V0
-    const virtualV0Id = uuidv4()
-    const virtualV0: PromptRecordChain['versions'][number] = {
-        id: virtualV0Id,
-        chainId: '',
-        version: 0,
-        originalPrompt: originalPrompt.value,
-        optimizedPrompt: originalPrompt.value,
-        type: 'imageOptimize',
-        timestamp: Date.now(),
-        modelKey: '',
-        templateId: '',
-    }
-
-    currentChainId.value = ''
-    currentVersions.value = [virtualV0]
-    currentVersionId.value = virtualV0Id
-    optimizedPrompt.value = originalPrompt.value
-    session.updateOptimizedResult({
-        optimizedPrompt: originalPrompt.value,
-        reasoning: '',
-        chainId: '',
-        versionId: '',
-    })
-
-    // 2. 清理旧的提示词评估结果，避免跨提示词残留
-    evaluationHandler.evaluation.clearResult('prompt-only');
-    evaluationHandler.evaluation.clearResult('prompt-iterate');
-
-    // 3. 收起输入区域
-    isInputPanelCollapsed.value = true;
-
-    await nextTick();
-
-    // 4. 触发 prompt-only 评估
-    try {
-        await evaluationHandler.handleEvaluate('prompt-only');
-    } finally {
-        isAnalyzing.value = false;
-    }
-};
 
 const extractPromptFromReferenceImage = async (imageB64: string, mimeType: string) => {
     const modelConfig = await getImageRecognitionModelConfig()
@@ -2421,23 +2277,46 @@ onUnmounted(() => {
 .variant-cell__controls {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 8px;
     min-width: 0;
+    flex-wrap: wrap;
+}
+
+.variant-cell__controls--stacked {
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+}
+
+.variant-cell__meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    flex-wrap: wrap;
+}
+
+.variant-cell__actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1 1 auto;
 }
 
 .variant-cell__label {
     flex-shrink: 0;
 }
 
-.variant-cell__stale {
-    flex-shrink: 0;
+.variant-cell__model {
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
-.variant-cell__model {
-    /* 让模型选择不要无限拉伸：保持紧凑，避免把右侧按钮/布局挤散 */
-    flex: 0 1 260px;
-    max-width: 260px;
-    min-width: 0;
+.variant-cell__run {
+    flex-shrink: 0;
 }
 
 .variant-results-wrap {

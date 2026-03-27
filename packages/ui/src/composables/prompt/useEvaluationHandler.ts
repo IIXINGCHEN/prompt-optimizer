@@ -8,12 +8,20 @@
  */
 
 import { computed, watch, type Ref, type ComputedRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useEvaluation, type UseEvaluationReturn, type ScoreLevel } from './useEvaluation'
 import type { CompareEvaluationPayload } from './compareEvaluation'
+import { useToast } from '../ui/useToast'
+import {
+  buildRewritePayload,
+  buildRewritePromptFromEvaluation,
+  normalizeRewriteLocaleLanguage,
+} from '@prompt-optimizer/core'
 import type { AppServices } from '../../types/services'
 import type {
   EvaluationType,
   EvaluationResponse,
+  EvaluationSubMode,
   EvaluationContentBlock,
   EvaluationTarget,
   EvaluationTestCase,
@@ -47,6 +55,7 @@ export interface UseEvaluationHandlerOptions {
 
 export interface PromptPanelRef {
   openIterateDialog?: (input?: string) => void
+  runIterateWithInput?: (input: string) => boolean
 }
 
 export interface ResultEvaluationViewProps {
@@ -76,11 +85,17 @@ export interface UseEvaluationHandlerReturn {
   createApplyImprovementHandler: (
     promptPanelRef: Ref<PromptPanelRef | null>
   ) => (payload: { improvement: string; type: EvaluationType }) => void
+  createRewriteFromEvaluationHandler: (
+    promptPanelRef: Ref<PromptPanelRef | null>
+  ) => (payload: { result: EvaluationResponse; type: EvaluationType }) => void
   getResultEvaluationProps: (variantId: string) => ResultEvaluationViewProps
   compareEvaluation: {
     hasCompareResult: ComputedRef<boolean>
     isEvaluatingCompare: ComputedRef<boolean>
     compareScore: ComputedRef<number | null>
+    compareMode: ComputedRef<'generic' | 'structured' | null>
+    compareStopSignals: ComputedRef<NonNullable<EvaluationResponse['metadata']>['compareStopSignals'] | null>
+    compareSnapshotRoles: ComputedRef<NonNullable<EvaluationResponse['metadata']>['snapshotRoles'] | null>
   }
   panelProps: ComputedRef<{
     show: boolean
@@ -91,6 +106,8 @@ export interface UseEvaluationHandlerReturn {
     currentType: EvaluationType | null
     currentVariantId: string | null
     scoreLevel: ScoreLevel | null
+    rewriteRecommendation: 'skip' | 'minor-rewrite' | 'rewrite' | null
+    rewriteReasons: string[]
   }>
 }
 
@@ -241,6 +258,11 @@ const toDesignContextBlock = (
 export function useEvaluationHandler(
   options: UseEvaluationHandlerOptions
 ): UseEvaluationHandlerReturn {
+  const { locale, t } = useI18n() as unknown as {
+    locale: Ref<string>
+    t: (key: string) => string
+  }
+  const toast = useToast()
   const {
     services,
     analysisOptimizedPrompt,
@@ -420,6 +442,9 @@ export function useEvaluationHandler(
     hasCompareResult: evaluation.hasCompareResult,
     isEvaluatingCompare: evaluation.isEvaluatingCompare,
     compareScore: evaluation.compareScore,
+    compareMode: evaluation.compareMode,
+    compareStopSignals: evaluation.compareStopSignals,
+    compareSnapshotRoles: evaluation.compareSnapshotRoles,
   }
 
   const getIsEvaluatingForActive = (): boolean => {
@@ -433,15 +458,45 @@ export function useEvaluationHandler(
 
   const panelProps = computed(() => {
     const active = evaluation.state.activeDetail
+    const activeResult = evaluation.activeResult.value
+    const rewriteGuidance = (() => {
+      if (!active || !activeResult) return null
+
+      const compareTarget = comparePayload?.value?.target
+      const workspacePrompt =
+        active.type === 'compare'
+          ? compareTarget?.workspacePrompt || analysisOptimizedPrompt.value || ''
+          : analysisOptimizedPrompt.value || ''
+      const referencePrompt =
+        active.type === 'compare'
+          ? compareTarget?.referencePrompt
+          : undefined
+      const language = normalizeRewriteLocaleLanguage(locale.value)
+
+      return buildRewritePayload({
+        result: activeResult,
+        type: active.type,
+        mode: {
+          functionMode: options.functionMode.value as 'basic' | 'pro' | 'image',
+          subMode: options.subMode.value as EvaluationSubMode,
+        },
+        language,
+        workspacePrompt,
+        referencePrompt,
+      }).compressedEvaluation.rewriteGuidance
+    })()
+
     return {
       show: evaluation.isPanelVisible.value,
       isEvaluating: getIsEvaluatingForActive(),
-      result: evaluation.activeResult.value,
+      result: activeResult,
       streamContent: evaluation.activeStreamContent.value,
       error: evaluation.activeError.value,
       currentType: active?.type ?? null,
       currentVariantId: active?.variantId ?? null,
       scoreLevel: evaluation.activeScoreLevel.value,
+      rewriteRecommendation: rewriteGuidance?.recommendation ?? null,
+      rewriteReasons: rewriteGuidance?.reasons || [],
     }
   })
 
@@ -464,6 +519,61 @@ export function useEvaluationHandler(
     }
   }
 
+  const createRewriteFromEvaluationHandler = (
+    promptPanelRef: Ref<PromptPanelRef | null>
+  ) => {
+    return (payload: { result: EvaluationResponse; type: EvaluationType }): void => {
+      if (!payload.result) return
+
+      const compareTarget = comparePayload?.value?.target
+      const workspacePrompt =
+        payload.type === 'compare'
+          ? compareTarget?.workspacePrompt || analysisOptimizedPrompt.value || ''
+          : analysisOptimizedPrompt.value || ''
+      const referencePrompt =
+        payload.type === 'compare'
+          ? compareTarget?.referencePrompt
+          : undefined
+      const language = normalizeRewriteLocaleLanguage(locale.value)
+      const rewritePayload = buildRewritePayload({
+        result: payload.result,
+        type: payload.type,
+        mode: {
+          functionMode: options.functionMode.value as 'basic' | 'pro' | 'image',
+          subMode: options.subMode.value as EvaluationSubMode,
+        },
+        language,
+        workspacePrompt,
+        referencePrompt,
+      })
+
+      if (
+        payload.type === 'compare' &&
+        rewritePayload.compressedEvaluation.rewriteGuidance.recommendation === 'skip'
+      ) {
+        toast.info(t('evaluation.rewriteSkipped'))
+        return
+      }
+
+      const rewriteInput = buildRewritePromptFromEvaluation({
+        result: payload.result,
+        type: payload.type,
+        mode: {
+          functionMode: options.functionMode.value as 'basic' | 'pro' | 'image',
+          subMode: options.subMode.value as EvaluationSubMode,
+        },
+        language,
+        workspacePrompt,
+        referencePrompt,
+      })
+      const started = promptPanelRef.value?.runIterateWithInput?.(rewriteInput) || false
+
+      if (started) {
+        evaluation.closePanel()
+      }
+    }
+  }
+
   return {
     evaluation,
     handleEvaluate,
@@ -472,6 +582,7 @@ export function useEvaluationHandler(
     handleEvaluateActiveWithFeedback,
     clearBeforeTest,
     createApplyImprovementHandler,
+    createRewriteFromEvaluationHandler,
     getResultEvaluationProps,
     compareEvaluation,
     panelProps,
