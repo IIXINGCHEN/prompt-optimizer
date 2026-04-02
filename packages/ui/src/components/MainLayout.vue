@@ -20,7 +20,7 @@
               @click="openBrandWebsite"
             >
               <NFlex align="center" :size="8" :wrap="false">
-                <NImage
+                <AppPreviewImage
                   :src="logoSrc"
                   alt="Logo"
                   :width="logoSize"
@@ -72,9 +72,10 @@
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 
 import { useI18n } from 'vue-i18n'
-import { NLayout, NLayoutHeader, NLayoutContent, NFlex, NImage, NText } from 'naive-ui'
+import { NLayout, NLayoutHeader, NLayoutContent, NFlex, NText } from 'naive-ui'
 import ToastUI from './Toast.vue'
 import logoImage from '../assets/logo.png'
+import AppPreviewImage from './media/AppPreviewImage.vue'
 
 const { t } = useI18n()
 
@@ -231,36 +232,6 @@ const openBrandWebsite = async () => {
   min-height: 32px;
 }
 
-.core-navigation :deep(.function-mode-selector) {
-  transform: scale(1.05);
-}
-
-.core-navigation :deep(.n-radio-group) {
-  background: var(--modal-color, #fff);
-  border-radius: 8px;
-  padding: 4px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  border: 1px solid var(--border-color, rgba(239, 239, 245, 0.6));
-}
-
-.core-navigation :deep(.n-radio-button) {
-  font-weight: 500;
-  min-width: 60px;
-  border-radius: 6px !important;
-  transition: all 0.2s ease;
-}
-
-.core-navigation :deep(.n-radio-button--checked) {
-  background: var(--primary-color) !important;
-  color: white !important;
-  font-weight: 600;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.12);
-}
-
-.core-navigation :deep(.n-radio-button:not(.n-radio-button--checked):hover) {
-  background: var(--hover-color, rgba(0, 0, 0, 0.06));
-}
-
 /* 响应式优化 */
 @media (max-width: 639px) {
   .logo-image {
@@ -270,15 +241,6 @@ const openBrandWebsite = async () => {
   .core-navigation {
     margin-left: 8px;
     padding-left: 8px;
-  }
-
-  .core-navigation :deep(.function-mode-selector) {
-    transform: scale(0.95);
-  }
-
-  .core-navigation :deep(.n-radio-button) {
-    min-width: 48px;
-    font-size: 12px;
   }
 }
 

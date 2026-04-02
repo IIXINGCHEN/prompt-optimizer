@@ -109,7 +109,7 @@ export class ModelManager implements IModelManager {
 
               if (isTextModelConfig(existingModel)) {
                 // 已经是新格式，保留用户配置，仅在缺失关键字段时补齐默认值
-                const updatedModel = { ...existingModel } as TextModelConfig;
+                let updatedModel = { ...existingModel } as TextModelConfig;
                 let patched = false;
 
                 if (!updatedModel.providerMeta && defaultConfig.providerMeta) {
@@ -128,18 +128,39 @@ export class ModelManager implements IModelManager {
                   console.log(`[ModelManager] Patched missing metadata for model: ${key}`);
                 }
 
-                // 检查是否需要自动注入 apiKey 并启用内置模型
-                if (this.shouldAutoEnableBuiltinModel(key, updatedModel, defaultConfig)) {
-                  updatedModels[key] = {
+                const backfillableFields = this.getBackfillableBuiltinConnectionFields(
+                  key,
+                  updatedModel,
+                  defaultConfig
+                );
+                const shouldAutoEnable = this.shouldAutoEnableBuiltinModel(
+                  key,
+                  updatedModel,
+                  defaultConfig,
+                  backfillableFields
+                );
+
+                // 内置模型在环境变量新增后，需要把缺失的必填连接字段回填到已有存储配置中。
+                if (backfillableFields.length > 0 || shouldAutoEnable) {
+                  const nextConnectionConfig = {
+                    ...(updatedModel.connectionConfig || {})
+                  }
+                  for (const field of backfillableFields) {
+                    nextConnectionConfig[field] = defaultConfig.connectionConfig?.[field]
+                  }
+
+                  updatedModel = {
                     ...updatedModel,
-                    connectionConfig: {
-                      ...(updatedModel.connectionConfig || {}),
-                      apiKey: defaultConfig.connectionConfig?.apiKey
-                    },
-                    enabled: true
+                    connectionConfig: nextConnectionConfig,
+                    enabled: shouldAutoEnable ? true : updatedModel.enabled
                   };
+                  updatedModels[key] = updatedModel;
                   hasUpdates = true;
-                  console.log(`[ModelManager] Auto-enabled builtin model with new API key: ${key}`);
+                  if (shouldAutoEnable) {
+                    console.log(`[ModelManager] Auto-enabled builtin model with new connection fields: ${key}`);
+                  } else {
+                    console.log(`[ModelManager] Backfilled missing connection fields for builtin model: ${key}`);
+                  }
                 }
               } else if (isLegacyConfig(existingModel)) {
                 // 旧格式，尝试使用 Registry 转换为新格式
@@ -605,38 +626,63 @@ export class ModelManager implements IModelManager {
   }
 
   /**
+   * 获取可从默认配置回填到内置模型中的缺失必填连接字段
+   */
+  private getBackfillableBuiltinConnectionFields(
+    modelId: string,
+    storedConfig: TextModelConfig,
+    defaultConfig: TextModelConfig
+  ): string[] {
+    const builtinIds = getBuiltinModelIds();
+    if (!builtinIds.includes(modelId)) {
+      return [];
+    }
+
+    const requiredFields = defaultConfig.providerMeta.connectionSchema?.required || ['apiKey'];
+    return requiredFields.filter((field) => {
+      const storedValue = storedConfig.connectionConfig?.[field];
+      const defaultValue = defaultConfig.connectionConfig?.[field];
+      return !this.hasConnectionValue(storedValue) && this.hasConnectionValue(defaultValue);
+    });
+  }
+
+  /**
    * 判断是否应该自动启用内置模型
-   * 条件：内置模型 + 存储的 apiKey 为空 + enabled 为 false + 新配置有 apiKey
+   * 条件：内置模型 + 存储的配置为 disabled + 回填后能满足所有必填连接字段
    */
   private shouldAutoEnableBuiltinModel(
     modelId: string,
     storedConfig: TextModelConfig,
-    defaultConfig: TextModelConfig
+    defaultConfig: TextModelConfig,
+    backfillableFields?: string[]
   ): boolean {
-    // 1. 必须是内置模型
     const builtinIds = getBuiltinModelIds();
     if (!builtinIds.includes(modelId)) {
       return false;
     }
 
-    // 2. 存储的配置必须是禁用状态
     if (storedConfig.enabled !== false) {
       return false;
     }
 
-    // 3. 存储的 apiKey 必须为空
-    const storedApiKey = storedConfig.connectionConfig?.apiKey?.trim() || '';
-    if (storedApiKey !== '') {
+    const fieldsToBackfill = backfillableFields ?? this.getBackfillableBuiltinConnectionFields(modelId, storedConfig, defaultConfig);
+    if (fieldsToBackfill.length === 0) {
       return false;
     }
 
-    // 4. 新的默认配置必须有 apiKey
-    const newApiKey = defaultConfig.connectionConfig?.apiKey?.trim() || '';
-    if (newApiKey === '') {
-      return false;
+    const requiredFields = defaultConfig.providerMeta.connectionSchema?.required || ['apiKey'];
+    const mergedConnectionConfig: Record<string, unknown> = {
+      ...(storedConfig.connectionConfig || {})
+    };
+    for (const field of fieldsToBackfill) {
+      mergedConnectionConfig[field] = defaultConfig.connectionConfig?.[field];
     }
 
-    return true;
+    return requiredFields.every((field) => this.hasConnectionValue(mergedConnectionConfig[field]));
+  }
+
+  private hasConnectionValue(value: unknown): boolean {
+    return typeof value === 'string' ? value.trim().length > 0 : !!value;
   }
 
   /**

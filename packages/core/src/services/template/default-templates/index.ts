@@ -102,6 +102,10 @@ import { template as evaluation_pro_user_prompt_iterate_en } from './evaluation/
 // 评估模板 - 图像模式/文生图
 import { template as evaluation_image_text2image_prompt_only } from './evaluation/image/text2image/evaluation-prompt-only';
 import { template as evaluation_image_text2image_prompt_only_en } from './evaluation/image/text2image/evaluation-prompt-only_en';
+import { template as evaluation_image_text2image_result } from './evaluation/image/text2image/evaluation-result';
+import { template as evaluation_image_text2image_result_en } from './evaluation/image/text2image/evaluation-result_en';
+import { template as evaluation_image_text2image_compare } from './evaluation/image/text2image/evaluation-compare';
+import { template as evaluation_image_text2image_compare_en } from './evaluation/image/text2image/evaluation-compare_en';
 // 评估模板 - 图像模式/图生图
 import { template as evaluation_image_image2image_prompt_only } from './evaluation/image/image2image/evaluation-prompt-only';
 import { template as evaluation_image_image2image_prompt_only_en } from './evaluation/image/image2image/evaluation-prompt-only_en';
@@ -129,9 +133,10 @@ import { template as evaluation_structured_compare_pair_judge_en } from './evalu
 import { template as evaluation_structured_compare_synthesis } from './evaluation-structured-compare/synthesis';
 import { template as evaluation_structured_compare_synthesis_en } from './evaluation-structured-compare/synthesis_en';
 
-// 图片 JSON 提取模板
-import { imagePromptExtractionTemplate } from './image-prompt-extraction';
-import { imagePromptExtractionTemplateEn } from './image-prompt-extraction';
+import { imagePromptCompositionTemplate } from './image-prompt-composition';
+import { imagePromptCompositionTemplateEn } from './image-prompt-composition';
+import { imagePromptMigrationTemplate } from './image-prompt-migration';
+import { imagePromptMigrationTemplateEn } from './image-prompt-migration';
 
 // 简单的模板集合 - 模板自身已包含完整信息（id、name、language、type等）
 export const ALL_TEMPLATES = {
@@ -224,6 +229,10 @@ export const ALL_TEMPLATES = {
   // 评估模板 - 图像模式/文生图
   evaluation_image_text2image_prompt_only,
   evaluation_image_text2image_prompt_only_en,
+  evaluation_image_text2image_result,
+  evaluation_image_text2image_result_en,
+  evaluation_image_text2image_compare,
+  evaluation_image_text2image_compare_en,
   // 评估模板 - 图像模式/图生图
   evaluation_image_image2image_prompt_only,
   evaluation_image_image2image_prompt_only_en,
@@ -248,7 +257,9 @@ export const ALL_TEMPLATES = {
   evaluation_structured_compare_pair_judge_en,
   evaluation_structured_compare_synthesis,
   evaluation_structured_compare_synthesis_en,
-  // 图片 JSON 提取模板
-  imagePromptExtractionTemplate,
-  imagePromptExtractionTemplateEn,
+  // 参考图内部模板
+  imagePromptCompositionTemplate,
+  imagePromptCompositionTemplateEn,
+  imagePromptMigrationTemplate,
+  imagePromptMigrationTemplateEn,
 };

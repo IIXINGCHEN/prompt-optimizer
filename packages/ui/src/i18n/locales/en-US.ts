@@ -84,6 +84,7 @@ export default {
     error: "Error",
     warning: "Warning",
     info: "Info",
+    download: "Download",
     deleteConfirmation: "Are you sure you want to delete this?",
     editingDisabledDuringStream:
       "Editing is disabled while content is being generated",
@@ -825,6 +826,9 @@ export default {
       section: "Provider Configuration",
       label: "Provider",
       placeholder: "Select Provider",
+    },
+    connection: {
+      accountId: "Account ID",
     },
     model: {
       section: "Model Configuration",
@@ -1995,12 +1999,32 @@ export default {
       modelPlaceholder: "Select model",
       optimizing: "Optimizing...",
       optimizePrompt: "Optimize Prompt",
-      extractFromImage: "Vision Extract",
+      extractFromImage: "Reference Image",
       extracting: "Extracting",
       extractCompleted: "Image extraction completed",
       extractCompletedWithVariables:
         "Image extraction completed and initialized {count} local variables",
       extractFailed: "Image extraction failed",
+    },
+
+    referenceImage: {
+      replicateAction: "Replicate",
+      replicateActionDescription:
+        "Ignore the current prompt and infer a reusable prompt from the reference image",
+      styleLearnAction: "Style Learn",
+      styleLearnActionDescription:
+        "Keep the current subject and learn the style, composition, and color language from the image",
+      styleLearnDisabledHint: "Enter what you want to generate first",
+      processingStatus: "Processing",
+      readyStatus: "Ready",
+      errorStatus: "Failed",
+      resultTitle: "Reference Result",
+      thumbnailAlt: "Reference thumbnail",
+      generatedPrompt: "Generated Prompt",
+      variablePreview: "Extracted Variables",
+      noVariables: "No variables have been extracted yet",
+      applyToPrompt: "Apply To Current Prompt",
+      applySuccess: "Inserted into the current prompt",
     },
 
     // Image generation area
@@ -2116,6 +2140,11 @@ export default {
         label: "API Base URL",
         description: "Base URL of the service endpoint",
         placeholder: "https://api.example.com/v1",
+      },
+      accountId: {
+        label: "Account ID",
+        description: "Cloudflare account ID",
+        placeholder: "Enter Cloudflare Account ID",
       },
       organization: {
         label: "Organization (optional)",
@@ -2476,6 +2505,10 @@ export default {
       compareHelp: {
         title: "Compare Evaluation Guide",
         tooltip: "What is compare evaluation?",
+      },
+      compareUnavailable: {
+        missingWorkspace:
+          "Compare evaluation requires at least one workspace test result because the system needs to produce guidance for the current workspace prompt. Run the workspace column first, then compare again.",
       },
       compareSummary: {
         decision: {

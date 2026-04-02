@@ -84,6 +84,7 @@ export default {
     error: "錯誤",
     warning: "警告",
     info: "資訊",
+    download: "下載",
     deleteConfirmation: "你確定要刪除嗎？",
     editingDisabledDuringStream: "內容生成期間無法編輯",
     markdown: "渲染",
@@ -804,6 +805,9 @@ export default {
       section: "提供商配置",
       label: "提供商",
       placeholder: "選擇提供商",
+    },
+    connection: {
+      accountId: "帳戶 ID",
     },
     model: {
       section: "模型配置",
@@ -1905,11 +1909,29 @@ export default {
       modelPlaceholder: "選擇模型",
       optimizing: "優化中...",
       optimizePrompt: "優化提示詞",
-      extractFromImage: "識圖提取",
+      extractFromImage: "參考圖",
       extracting: "提取中",
       extractCompleted: "圖片提取完成",
       extractCompletedWithVariables: "圖片提取完成，已識別 {count} 個本地變數並填入初始值",
       extractFailed: "圖片提取失敗",
+    },
+
+    referenceImage: {
+      replicateAction: "復刻",
+      replicateActionDescription: "忽略目前提示詞，以參考圖為主反推提示詞與變數",
+      styleLearnAction: "風格學習",
+      styleLearnActionDescription: "保留目前提示詞主體，只學習圖片的風格、構圖與色彩",
+      styleLearnDisabledHint: "請先輸入你想畫什麼",
+      processingStatus: "處理中",
+      readyStatus: "已生成",
+      errorStatus: "失敗",
+      resultTitle: "參考圖結果",
+      thumbnailAlt: "參考圖縮圖",
+      generatedPrompt: "生成後的提示詞",
+      variablePreview: "提取到的變數",
+      noVariables: "目前還沒有提取到變數",
+      applyToPrompt: "套用到目前提示詞",
+      applySuccess: "已寫入目前提示詞",
     },
 
     // 圖像生成區域
@@ -2025,6 +2047,11 @@ export default {
         label: "API 位址",
         description: "服務端點的基礎位址",
         placeholder: "https://api.example.com/v1",
+      },
+      accountId: {
+        label: "帳戶 ID",
+        description: "Cloudflare 帳戶 ID",
+        placeholder: "請輸入 Cloudflare Account ID",
       },
       organization: {
         label: "組織標識（選填）",
@@ -2378,6 +2405,10 @@ export default {
       compareHelp: {
         title: "對比評估教學",
         tooltip: "什麼是對比評估？",
+      },
+      compareUnavailable: {
+        missingWorkspace:
+          "對比評估至少需要一個工作區測試結果，因為系統會圍繞目前工作區提示詞給出改進建議。請先執行工作區欄位後再進行對比。",
       },
       compareSummary: {
         decision: {

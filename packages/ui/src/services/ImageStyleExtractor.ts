@@ -9,8 +9,10 @@ import {
 import { VARIABLE_VALIDATION, isValidVariableName } from '../types/variable'
 
 export type ImagePromptExtractionMode = 'text2image' | 'image2image'
+export type ReferenceApplicationMode = 'replicate' | 'migrate'
+export type ReferencePromptResolutionStage = 'generating-preview'
 
-export interface ExtractImageStyleResult {
+export interface ReferencePromptPreview {
   prompt: string
   variableDefaults: Record<string, string>
   rawText: string
@@ -21,18 +23,53 @@ interface ExtractionPrompts {
   userPrompt: string
 }
 
-const MAX_EXTRACTED_VARIABLES = 3
-const IMAGE_PROMPT_EXTRACTION_TEMPLATE_ID = 'image-prompt-extraction'
+interface ResolveReferencePromptPreviewOptions {
+  mode: ReferenceApplicationMode
+  originalPrompt: string
+  referenceMode?: ImagePromptExtractionMode
+  modelConfig?: TextModelConfig
+  imageB64?: string
+  mimeType?: string
+  templateManager?: ITemplateManager | null
+  onStageChange?: (stage: ReferencePromptResolutionStage) => void
+}
+
+const MAX_REFERENCE_DIALOG_VARIABLES = 5
+const IMAGE_PROMPT_COMPOSITION_TEMPLATE_ID = 'image-prompt-from-reference-image'
+const IMAGE_PROMPT_MIGRATION_TEMPLATE_ID = 'image-prompt-migration'
 const imageUnderstandingService = createImageUnderstandingService()
 
-export async function extractImageStyle(
-  modelConfig: TextModelConfig,
-  imageB64: string,
-  mimeType: string,
-  mode: ImagePromptExtractionMode,
-  templateManager: ITemplateManager | null | undefined
-): Promise<ExtractImageStyleResult> {
-  const prompts = await buildExtractionPrompts(templateManager, mode)
+export async function resolveReferencePromptPreview(
+  options: ResolveReferencePromptPreviewOptions,
+): Promise<ReferencePromptPreview> {
+  const {
+    mode,
+    originalPrompt,
+    referenceMode = 'text2image',
+    modelConfig,
+    imageB64,
+    mimeType,
+    templateManager,
+    onStageChange,
+  } = options
+
+  const effectiveOriginalPrompt = mode === 'migrate' ? originalPrompt.trim() : ''
+
+  if (!modelConfig || !imageB64 || !mimeType) {
+    throw new Error('Reference image and image model are required')
+  }
+
+  const templateId =
+    mode === 'migrate' && effectiveOriginalPrompt
+      ? IMAGE_PROMPT_MIGRATION_TEMPLATE_ID
+      : IMAGE_PROMPT_COMPOSITION_TEMPLATE_ID
+
+  const prompts = await buildReferencePromptPrompts(templateManager, templateId, {
+    originalPrompt: effectiveOriginalPrompt,
+    referenceMode,
+  })
+
+  onStageChange?.('generating-preview')
   const response = await imageUnderstandingService.understand({
     modelConfig,
     systemPrompt: prompts.systemPrompt || undefined,
@@ -40,83 +77,165 @@ export async function extractImageStyle(
     images: [
       {
         b64: imageB64,
-        mimeType
-      }
+        mimeType,
+      },
     ],
     paramOverrides: {
-      temperature: 0.2
+      temperature: 0.2,
     },
-    responseMimeType: 'application/json'
+    responseMimeType: 'application/json',
   })
 
   const rawText = typeof response.content === 'string' ? response.content.trim() : ''
   if (!rawText) {
-    throw new Error('Model did not return a valid extraction result')
+    throw new Error('Model did not return a valid structured prompt')
   }
 
-  return normalizeExtractionResult(rawText)
+  return normalizeReferencePromptPreview(rawText)
 }
 
-async function buildExtractionPrompts(
+async function buildReferencePromptPrompts(
   templateManager: ITemplateManager | null | undefined,
-  mode: ImagePromptExtractionMode
+  templateId: string,
+  context: {
+    originalPrompt: string
+    referenceMode: ImagePromptExtractionMode
+  },
 ): Promise<ExtractionPrompts> {
   if (!templateManager) {
     throw new Error('Template manager is not initialized')
   }
 
-  const template = await templateManager.getTemplate(IMAGE_PROMPT_EXTRACTION_TEMPLATE_ID)
+  const template = await templateManager.getTemplate(templateId)
   const messages = TemplateProcessor.processTemplate(
     template,
-    createExtractionTemplateContext(mode, template)
+    createReferencePromptTemplateContext(context, template),
   )
 
   const systemPrompt = collectPromptByRole(messages, 'system')
   const userPrompt = collectPromptByRole(messages, 'user')
 
   if (!userPrompt) {
-    throw new Error('Image extraction template is missing a user prompt')
+    throw new Error('Reference image template is missing a user prompt')
   }
 
   return {
     systemPrompt,
-    userPrompt
+    userPrompt,
   }
 }
 
-function normalizeExtractionResult(rawText: string): ExtractImageStyleResult {
+function normalizeReferencePromptPreview(rawText: string): ReferencePromptPreview {
   const parsed = parseJsonObject(rawText)
-  const { promptObject, variableDefaults } = parseExtractionEnvelope(parsed)
+  const variableDefaults = normalizeVariableDefaults(
+    isRecord(parsed.defaults)
+      ? parsed.defaults
+      : isRecord(parsed.variableDefaults)
+        ? parsed.variableDefaults
+        : {},
+  )
+  const promptObject = normalizePromptObject(
+    resolvePromptObject(parsed.prompt ?? parsed.promptJson ?? parsed),
+    Object.keys(variableDefaults),
+  )
   const constrainedPromptObject = constrainPromptVariables(promptObject, variableDefaults)
-  const keptVariableNames = scanVariablesFromValue(constrainedPromptObject)
-  const filteredDefaults = buildFilteredDefaults(keptVariableNames, variableDefaults)
   const formattedPrompt = JSON.stringify(constrainedPromptObject, null, 2)
 
   if (!formattedPrompt || formattedPrompt === 'null') {
-    throw new Error('Model response is not a valid JSON object')
+    throw new Error('Model response is not a valid JSON prompt object')
   }
+
+  const variableNames = scanVariablesFromValue(constrainedPromptObject)
+  const defaults = buildFilteredDefaults(variableNames, variableDefaults)
 
   return {
     prompt: formattedPrompt,
-    variableDefaults: filteredDefaults,
-    rawText
+    variableDefaults: defaults,
+    rawText,
   }
 }
 
-function parseExtractionEnvelope(parsed: Record<string, unknown>): {
-  promptObject: Record<string, unknown>
-  variableDefaults: Record<string, string>
-} {
-  const promptCandidate = parsed.prompt
-  const defaultsCandidate = parsed.defaults
+function normalizeVariableDefaults(value: unknown): Record<string, string> {
+  if (!isRecord(value)) return {}
 
-  const promptObject = resolvePromptObject(promptCandidate ?? parsed)
-  const variableDefaults = normalizeVariableDefaults(defaultsCandidate)
+  return Object.entries(value).reduce<Record<string, string>>((acc, [name, rawValue]) => {
+    const variableName = name.trim()
+    if (!isValidVariableName(variableName)) {
+      return acc
+    }
 
-  return {
-    promptObject,
-    variableDefaults
+    if (typeof rawValue !== 'string') {
+      return acc
+    }
+
+    const trimmedValue = rawValue.trim()
+    if (!trimmedValue) {
+      return acc
+    }
+
+    acc[variableName] = trimmedValue
+    return acc
+  }, {})
+}
+
+function normalizePromptObject(
+  value: Record<string, unknown>,
+  knownVariableNames: string[] = [],
+): Record<string, unknown> {
+  const knownVariableSet = new Set(
+    knownVariableNames
+      .map((name) => name.trim())
+      .filter((name) => isValidVariableName(name)),
+  )
+
+  const normalizeString = (content: string): string => {
+    let normalized = content.replace(
+      /(?<!\{)\{([a-zA-Z0-9_\-\u4e00-\u9fa5]+)\}(?!\})/g,
+      '{{$1}}',
+    )
+
+    if (knownVariableSet.size === 0) {
+      return normalized
+    }
+
+    normalized = normalized.replace(
+      /「([a-zA-Z0-9_\-\u4e00-\u9fa5]+)」/g,
+      (match, rawVariableName: string) => {
+        const variableName = rawVariableName.trim()
+        return knownVariableSet.has(variableName) ? `{{${variableName}}}` : match
+      },
+    )
+
+    normalized = normalized.replace(
+      /『([a-zA-Z0-9_\-\u4e00-\u9fa5]+)』/g,
+      (match, rawVariableName: string) => {
+        const variableName = rawVariableName.trim()
+        return knownVariableSet.has(variableName) ? `{{${variableName}}}` : match
+      },
+    )
+
+    return normalized
   }
+
+  const normalize = (current: unknown): unknown => {
+    if (typeof current === 'string') {
+      return normalizeString(current)
+    }
+
+    if (Array.isArray(current)) {
+      return current.map((item) => normalize(item))
+    }
+
+    if (isRecord(current)) {
+      return Object.fromEntries(
+        Object.entries(current).map(([key, child]) => [key, normalize(child)]),
+      )
+    }
+
+    return current
+  }
+
+  return normalize(value) as Record<string, unknown>
 }
 
 function resolvePromptObject(value: unknown): Record<string, unknown> {
@@ -135,39 +254,15 @@ function resolvePromptObject(value: unknown): Record<string, unknown> {
     }
   }
 
-  throw new Error('Extraction result is missing a usable JSON prompt object')
-}
-
-function normalizeVariableDefaults(value: unknown): Record<string, string> {
-  if (!isRecord(value)) return {}
-
-  const defaults: Record<string, string> = {}
-  for (const [name, rawValue] of Object.entries(value)) {
-    const variableName = name.trim()
-    if (!isValidVariableName(variableName)) continue
-    if (typeof rawValue !== 'string') continue
-
-    const normalizedValue = rawValue.trim()
-    if (!normalizedValue) continue
-
-    defaults[variableName] = normalizedValue
-  }
-
-  return defaults
+  throw new Error('Model response is missing a usable JSON prompt object')
 }
 
 function constrainPromptVariables(
   promptObject: Record<string, unknown>,
-  defaults: Record<string, string>
+  defaults: Record<string, string>,
 ): Record<string, unknown> {
   const variableNames = scanVariablesFromValue(promptObject)
-  const missingDefaults = variableNames.filter((name) => !defaults[name])
-
-  if (missingDefaults.length > 0) {
-    throw new Error(`Extraction result is missing variable default values: ${missingDefaults.join(', ')}`)
-  }
-
-  const keptNames = variableNames.slice(0, MAX_EXTRACTED_VARIABLES)
+  const keptNames = variableNames.slice(0, MAX_REFERENCE_DIALOG_VARIABLES)
   const keptSet = new Set(keptNames)
 
   return replacePlaceholdersInValue(promptObject, keptSet, defaults) as Record<string, unknown>
@@ -176,7 +271,7 @@ function constrainPromptVariables(
 function replacePlaceholdersInValue(
   value: unknown,
   keptNames: Set<string>,
-  defaults: Record<string, string>
+  defaults: Record<string, string>,
 ): unknown {
   if (typeof value === 'string') {
     VARIABLE_VALIDATION.VARIABLE_SCAN_PATTERN.lastIndex = 0
@@ -195,7 +290,7 @@ function replacePlaceholdersInValue(
         }
 
         return defaults[variableName] ?? match
-      }
+      },
     )
   }
 
@@ -204,14 +299,91 @@ function replacePlaceholdersInValue(
   }
 
   if (isRecord(value)) {
-    const next: Record<string, unknown> = {}
-    for (const [key, child] of Object.entries(value)) {
-      next[key] = replacePlaceholdersInValue(child, keptNames, defaults)
-    }
-    return next
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [
+        key,
+        replacePlaceholdersInValue(child, keptNames, defaults),
+      ]),
+    )
   }
 
   return value
+}
+
+function buildFilteredDefaults(
+  variableNames: string[],
+  defaults: Record<string, string>,
+): Record<string, string> {
+  return variableNames.reduce<Record<string, string>>((acc, name) => {
+    if (!isValidVariableName(name)) {
+      return acc
+    }
+
+    acc[name] = defaults[name] ?? ''
+    return acc
+  }, {})
+}
+
+function parseJsonObject(rawText: string): Record<string, unknown> {
+  const trimmed = rawText.trim()
+  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)
+  const candidate = fencedMatch?.[1]?.trim() || trimmed
+  const start = candidate.indexOf('{')
+  const end = candidate.lastIndexOf('}')
+  const jsonText =
+    start >= 0 && end >= start
+      ? candidate.slice(start, end + 1)
+      : candidate
+
+  try {
+    const parsed = JSON.parse(jsonText)
+    if (!isRecord(parsed)) {
+      throw new Error('Model response is not a valid JSON object')
+    }
+    return parsed
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Model response is not a valid JSON object') {
+      throw error
+    }
+    throw new Error('Model response is not valid JSON', { cause: error })
+  }
+}
+
+function createReferencePromptTemplateContext(
+  context: {
+    originalPrompt: string
+    referenceMode: ImagePromptExtractionMode
+  },
+  template: Template,
+): Record<string, string> {
+  const isEnglish = template.metadata.language === 'en'
+  const trimmedOriginalPrompt = context.originalPrompt.trim()
+
+  return {
+    referenceMode: context.referenceMode,
+    originalPrompt: trimmedOriginalPrompt,
+    generationGoal:
+      context.referenceMode === 'image2image'
+        ? isEnglish
+          ? 'image-to-image reference editing'
+          : '图生图参考编辑'
+        : isEnglish
+          ? 'text-to-image reference generation'
+          : '文生图参考生成',
+    promptRequirement: trimmedOriginalPrompt
+      ? trimmedOriginalPrompt
+      : isEnglish
+        ? 'No original prompt is provided. Infer a reusable structured image prompt directly from the reference image.'
+        : '当前没有原始提示词，请直接根据参考图反推一份可复用的结构化生图提示词。',
+  }
+}
+
+function collectPromptByRole(messages: Message[], role: Message['role']): string {
+  return messages
+    .filter((message) => message.role === role && typeof message.content === 'string')
+    .map((message) => message.content.trim())
+    .filter(Boolean)
+    .join('\n\n')
 }
 
 function scanVariablesFromValue(value: unknown): string[] {
@@ -252,147 +424,6 @@ function scanVariablesFromValue(value: unknown): string[] {
 
   visit(value)
   return found
-}
-
-function buildFilteredDefaults(
-  variableNames: string[],
-  defaults: Record<string, string>
-): Record<string, string> {
-  const next: Record<string, string> = {}
-  for (const name of variableNames) {
-    const value = defaults[name]
-    if (value) {
-      next[name] = value
-    }
-  }
-  return next
-}
-
-function parseJsonObject(rawText: string): Record<string, unknown> {
-  const trimmed = rawText.trim()
-  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)
-  const candidate = fencedMatch?.[1]?.trim() || trimmed
-  const start = candidate.indexOf('{')
-  const end = candidate.lastIndexOf('}')
-  const jsonText =
-    start >= 0 && end >= start
-      ? candidate.slice(start, end + 1)
-      : candidate
-
-  try {
-    const parsed = JSON.parse(jsonText)
-    if (!isRecord(parsed)) {
-      throw new Error('Model response is not a valid JSON object')
-    }
-    return parsed
-  } catch (error) {
-    if (error instanceof Error && error.message === 'Model response is not a valid JSON object') {
-      throw error
-    }
-    throw new Error('Model response is not valid JSON')
-  }
-}
-
-function createExtractionTemplateContext(
-  mode: ImagePromptExtractionMode,
-  template: Template
-): Record<string, string | number> {
-  const isEnglish = template.metadata.language === 'en'
-  const variablePlaceholderExample = '{{snake_case}}'
-
-  if (mode === 'image2image') {
-    return {
-      modeGoal: isEnglish ? 'image-to-image generation' : '图生图',
-      modeSpecificRequirement: isEnglish
-        ? 'For image-to-image workflows, you may explicitly describe what to preserve and what to change relative to the reference image, but do not invent content that is not visually present.'
-        : '图生图场景下，可以在 JSON 中明确“保留/改变”的参考图指导，但不要虚构输入图中不存在的内容。',
-      recommendedStructure: isEnglish
-        ? [
-            '{',
-            '  "scene": { },',
-            '  "reference_guidance": {',
-            '    "use_input_image_as_reference": true,',
-            '    "preserve": ["..."],',
-            '    "change": ["..."]',
-            '  },',
-            '  "constraints": { "must_keep": ["..."], "avoid": ["..."] },',
-            '  "negative_prompt": ["..."]',
-            '}'
-          ].join('\n')
-        : [
-            '{',
-            '  "场景": { },',
-            '  "参考图指导": {',
-            '    "使用输入图作为参考": true,',
-            '    "保留": ["..."],',
-            '    "改变": ["..."]',
-            '  },',
-            '  "约束": { "必须保留": ["..."], "避免": ["..."] },',
-            '  "负面提示词": ["..."]',
-            '}'
-          ].join('\n'),
-      maxExtractedVariables: MAX_EXTRACTED_VARIABLES,
-      variablePlaceholderExample
-    }
-  }
-
-  return {
-    modeGoal: isEnglish ? 'text-to-image generation' : '文生图',
-    modeSpecificRequirement: isEnglish
-      ? 'For text-to-image workflows, organize the subject, environment, camera, lighting, and style into a JSON structure that can be used directly for generation.'
-      : '文生图场景下，请把画面主体、环境、镜头、光影和风格描述整理成便于直接生图的 JSON 结构。',
-    recommendedStructure: isEnglish
-      ? [
-          '{',
-          '  "scene": {',
-          '    "description": "...",',
-          '    "subjects": [',
-          '      { "type": "...", "description": "...", "attributes": { } }',
-          '    ],',
-          '    "environment": { },',
-          '    "action": { },',
-          '    "composition": { },',
-          '    "camera": { },',
-          '    "lighting": { },',
-          '    "color": { },',
-          '    "style": { },',
-          '    "details": ["..."]',
-          '  },',
-          '  "constraints": { "must_keep": ["..."], "avoid": ["..."] },',
-          '  "negative_prompt": ["..."]',
-          '}'
-        ].join('\n')
-      : [
-          '{',
-          '  "场景": {',
-          '    "描述": "...",',
-          '    "主体": [',
-          '      { "类型": "...", "描述": "...", "属性": { } }',
-          '    ],',
-          '    "环境": { },',
-          '    "动作": { },',
-          '    "构图": { },',
-          '    "相机": { },',
-          '    "光照": { },',
-          '    "色彩": { },',
-          '    "风格": { },',
-          '    "细节": ["..."]',
-          '  },',
-          '  "约束": { "必须保留": ["..."], "避免": ["..."] },',
-          '  "负面提示词": ["..."]',
-          '}'
-        ].join('\n'),
-    maxExtractedVariables: MAX_EXTRACTED_VARIABLES,
-    variablePlaceholderExample
-  }
-}
-
-function collectPromptByRole(messages: Message[], role: Message['role']): string {
-  return messages
-    .filter((message) => message.role === role && typeof message.content === 'string')
-    .map((message) => message.content.trim())
-    .filter(Boolean)
-    .join('\n\n')
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

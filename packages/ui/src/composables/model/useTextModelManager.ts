@@ -562,7 +562,7 @@ export function useTextModelManager() {
       // but surface the failure to avoid a misleading "success" toast.
       const errorMessage = getI18nErrorMessage(error, t('modelManager.loadFailed'))
 
-      let staticCount = 0
+      let staticCount: number
       try {
         const staticModels = textAdapterRegistry.getStaticModels(providerTemplateId)
         staticCount = staticModels.length
@@ -588,7 +588,7 @@ export function useTextModelManager() {
     return adapter.getProvider()
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   const ensureModelMeta = (providerId: string, modelId: string, _existing?: TextModel) => {
     const adapter = textAdapterRegistry.getAdapter(providerId)
     const staticModels = adapter.getModels()

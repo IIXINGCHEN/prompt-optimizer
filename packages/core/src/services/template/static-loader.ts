@@ -21,7 +21,8 @@ export type TemplateType =
   | 'context-user-optimize'
   | 'context-iterate'
   | 'evaluation'
-  | 'image-prompt-extraction';
+  | 'image-prompt-composition'
+  | 'image-prompt-migration';
 export type Language = 'zh' | 'en';
 
 export interface StaticTemplateCollection {
@@ -81,7 +82,8 @@ export class StaticLoader {
         'context-user-optimize': { zh: {}, en: {} },
         'context-iterate': { zh: {}, en: {} },
         'evaluation': { zh: {}, en: {} },
-        'image-prompt-extraction': { zh: {}, en: {} }
+        'image-prompt-composition': { zh: {}, en: {} },
+        'image-prompt-migration': { zh: {}, en: {} }
       };
 
       // 处理每个模板
@@ -124,8 +126,11 @@ export class StaticLoader {
           case 'evaluation':
             normalizedType = 'evaluation';
             break;
-          case 'image-prompt-extraction':
-            normalizedType = 'image-prompt-extraction';
+          case 'image-prompt-composition':
+            normalizedType = 'image-prompt-composition';
+            break;
+          case 'image-prompt-migration':
+            normalizedType = 'image-prompt-migration';
             break;
           case 'iterate':
           case 'optimize':
@@ -161,7 +166,8 @@ export class StaticLoader {
         'context-user-optimize': Object.keys(byType['context-user-optimize'].zh).length + Object.keys(byType['context-user-optimize'].en).length,
         'context-iterate': Object.keys(byType['context-iterate'].zh).length + Object.keys(byType['context-iterate'].en).length,
         evaluation: Object.keys(byType.evaluation.zh).length + Object.keys(byType.evaluation.en).length,
-        'image-prompt-extraction': Object.keys(byType['image-prompt-extraction'].zh).length + Object.keys(byType['image-prompt-extraction'].en).length
+        'image-prompt-composition': Object.keys(byType['image-prompt-composition'].zh).length + Object.keys(byType['image-prompt-composition'].en).length,
+        'image-prompt-migration': Object.keys(byType['image-prompt-migration'].zh).length + Object.keys(byType['image-prompt-migration'].en).length
       });
 
       StaticLoader.templateCache = result;

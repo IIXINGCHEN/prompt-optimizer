@@ -84,6 +84,7 @@ export default {
     error: "错误",
     warning: "警告",
     info: "信息",
+    download: "下载",
     deleteConfirmation: "你确定要删除吗？",
     editingDisabledDuringStream: "内容生成期间无法编辑",
     markdown: "渲染",
@@ -805,6 +806,9 @@ export default {
       section: "提供商配置",
       label: "提供商",
       placeholder: "选择提供商",
+    },
+    connection: {
+      accountId: "账户 ID",
     },
     model: {
       section: "模型配置",
@@ -1925,11 +1929,29 @@ export default {
       modelPlaceholder: "选择模型",
       optimizing: "优化中...",
       optimizePrompt: "优化提示词",
-      extractFromImage: "识图提取",
+      extractFromImage: "参考图",
       extracting: "提取中",
       extractCompleted: "图片提取完成",
       extractCompletedWithVariables: "图片提取完成，已识别 {count} 个本地变量并填入初始值",
       extractFailed: "图片提取失败",
+    },
+
+    referenceImage: {
+      replicateAction: "复刻",
+      replicateActionDescription: "忽略当前提示词，以参考图为主反推提示词和变量",
+      styleLearnAction: "风格学习",
+      styleLearnActionDescription: "保留当前提示词主体，只学习参考图的风格、构图和色彩",
+      styleLearnDisabledHint: "请先输入你想画什么",
+      processingStatus: "处理中",
+      readyStatus: "已生成",
+      errorStatus: "失败",
+      resultTitle: "参考图结果",
+      thumbnailAlt: "参考图缩略图",
+      generatedPrompt: "生成后的提示词",
+      variablePreview: "提取到的变量",
+      noVariables: "当前还没有提取到变量",
+      applyToPrompt: "应用到当前提示词",
+      applySuccess: "已写入当前提示词",
     },
 
     // 图像生成区域
@@ -2045,6 +2067,11 @@ export default {
         label: "API 地址",
         description: "服务端点的基础地址",
         placeholder: "https://api.example.com/v1",
+      },
+      accountId: {
+        label: "账户 ID",
+        description: "Cloudflare 账户 ID",
+        placeholder: "请输入 Cloudflare Account ID",
       },
       organization: {
         label: "组织标识（可选）",
@@ -2398,6 +2425,10 @@ export default {
     compareHelp: {
       title: "对比评估教程",
       tooltip: "什么是对比评估？",
+    },
+    compareUnavailable: {
+      missingWorkspace:
+        "对比评估至少需要一个工作区测试结果，因为系统会围绕当前工作区提示词给出改进建议。请先运行工作区列后再对比。",
     },
     compareSummary: {
       decision: {
