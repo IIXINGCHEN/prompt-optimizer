@@ -79,6 +79,7 @@ export interface ImageRequest {
   prompt: string
   configId: string                        // 直接使用配置ID，简化调用
   inputImage?: ImageInputRef               // 可选的输入图像
+  inputImages?: ImageInputRef[]            // 多图输入（V1）
   count?: number                           // 生成数量，默认 1
   paramOverrides?: Record<string, unknown> // 临时参数覆盖，不影响保存的配置
 }
@@ -94,6 +95,16 @@ export type Text2ImageRequest = Omit<ImageRequest, 'inputImage'> & { inputImage?
  * 图生图请求：必须提供 inputImage。
  */
 export type Image2ImageRequest = Omit<ImageRequest, 'inputImage'> & { inputImage: ImageInputRef }
+
+/**
+ * 多图生图请求：必须提供至少两张输入图。
+ */
+export type MultiImageRequest = Omit<ImageRequest, 'inputImage' | 'inputImages'> & {
+  inputImage?: never
+  inputImages: ImageInputRef[]
+}
+
+export type MultiImageGenerationRequest = MultiImageRequest
 
 export interface ImageResultItem {
   b64?: string
@@ -191,6 +202,7 @@ export interface IImageService {
   // 显式模式入口：避免模式误判与错误信息混淆
   generateText2Image(request: Text2ImageRequest): Promise<ImageResult>
   generateImage2Image(request: Image2ImageRequest): Promise<ImageResult>
+  generateMultiImage(request: MultiImageGenerationRequest): Promise<ImageResult>
 
   // 辅助功能（兼容入口）
   validateRequest(request: ImageRequest): Promise<void>
@@ -198,6 +210,7 @@ export interface IImageService {
   // 显式校验：用于 UI/调用方提前发现配置与输入不匹配
   validateText2ImageRequest(request: Text2ImageRequest): Promise<void>
   validateImage2ImageRequest(request: Image2ImageRequest): Promise<void>
+  validateMultiImageRequest(request: MultiImageRequest): Promise<void>
 
   // 新增：连接测试（直接使用临时配置，不依赖已保存的配置）
   testConnection(config: ImageModelConfig): Promise<ImageResult>
@@ -257,6 +270,7 @@ export interface ImageStorageConfig {
   maxCount?: number            // 最大图像数量，默认 100张
   autoCleanupThreshold?: number  // 自动清理阈值（达到此比例时触发），默认 0.8
   dbName?: string              // IndexedDB 数据库名（默认 PromptOptimizerImageDB）
+  quotaStrategy?: 'evict' | 'reject' // 超额策略：LRU 淘汰 vs 直接报错
 }
 
 /**

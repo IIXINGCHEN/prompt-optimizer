@@ -900,6 +900,7 @@ import { useFunctionModelManager } from '../../composables/model'
 import { useWorkspaceTemplateSelection } from '../../composables/workspaces/useWorkspaceTemplateSelection'
 import { useWorkspaceTextModelSelection } from '../../composables/workspaces/useWorkspaceTextModelSelection'
 import { useElementSize } from '@vueuse/core'
+import { runTasksWithExecutionMode } from '../../utils/runTasksSequentially'
 import {
     buildImageText2ImageComparePayload,
     buildImageText2ImageResultEvaluationTargets,
@@ -1996,15 +1997,15 @@ const runAllVariants = async () => {
 
     evaluationHandler.clearBeforeTest()
 
-    const results = await Promise.all(
-        ids.map((id) =>
+    const results = await runTasksWithExecutionMode(
+        ids,
+        async (id) =>
             runVariant(id, {
                 silentSuccess: true,
                 silentError: true,
                 persist: false,
                 skipClearEvaluation: true,
             }),
-        ),
     )
 
     queueSessionSave()

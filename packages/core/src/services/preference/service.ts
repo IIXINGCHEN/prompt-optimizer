@@ -5,6 +5,53 @@ import { IMPORT_EXPORT_ERROR_CODES } from "../../constants/error-codes";
 import { StorageError } from "../storage/errors";
 import { toErrorWithCode } from "../../utils/error";
 
+const SESSION_KEY_PREFIX = "session/";
+const MAX_SESSION_SNAPSHOT_BYTES = 1024 * 1024;
+
+type SessionStorageOperation = "read" | "write";
+type PreferenceStorageOperation = SessionStorageOperation | "delete";
+
+const getSerializedValueBytes = (value: string): number =>
+  new TextEncoder().encode(value).byteLength;
+
+const assertSessionSnapshotSize = (
+  key: string,
+  serializedValue: string,
+  operation: SessionStorageOperation,
+): void => {
+  if (!key.startsWith(SESSION_KEY_PREFIX)) {
+    return;
+  }
+
+  const bytes = getSerializedValueBytes(serializedValue);
+  if (bytes <= MAX_SESSION_SNAPSHOT_BYTES) {
+    return;
+  }
+
+  throw new StorageError(
+    `Session snapshot exceeds ${MAX_SESSION_SNAPSHOT_BYTES} bytes`,
+    operation,
+    {
+      reason: "session_snapshot_too_large",
+      key,
+      bytes,
+      limitBytes: MAX_SESSION_SNAPSHOT_BYTES,
+    },
+  );
+};
+
+const assertValidPreferenceKey: (
+  key: unknown,
+  operation: PreferenceStorageOperation,
+) => asserts key is string = (key, operation) => {
+  if (typeof key !== "string" || key.length === 0) {
+    throw new StorageError("Invalid preference key", operation, {
+      reason: "invalid_preference_key",
+      keyType: typeof key,
+    });
+  }
+};
+
 // 需要导出的UI配置键 - 白名单验证
 const UI_SETTINGS_KEYS = [
   "app:settings:ui:theme-id",
@@ -85,12 +132,14 @@ export class PreferenceService implements IPreferenceService {
    */
   async get<T>(key: string, defaultValue: T): Promise<T> {
     try {
+      assertValidPreferenceKey(key, "read");
       const prefKey = this.getPrefKey(key);
       const storedValue = await this.storageProvider.getItem(prefKey);
 
       if (storedValue === null) {
         return defaultValue;
       }
+      assertSessionSnapshotSize(key, storedValue, "read");
       // 将键添加到缓存中
       this.keyCache.add(key);
       return JSON.parse(storedValue) as T;
@@ -114,8 +163,10 @@ export class PreferenceService implements IPreferenceService {
    */
   async set<T>(key: string, value: T): Promise<void> {
     try {
+      assertValidPreferenceKey(key, "write");
       const prefKey = this.getPrefKey(key);
       const stringValue = JSON.stringify(value);
+      assertSessionSnapshotSize(key, stringValue, "write");
 
       await this.storageProvider.setItem(prefKey, stringValue);
       // 将键添加到缓存中
@@ -139,6 +190,7 @@ export class PreferenceService implements IPreferenceService {
    */
   async delete(key: string): Promise<void> {
     try {
+      assertValidPreferenceKey(key, "delete");
       const prefKey = this.getPrefKey(key);
       await this.storageProvider.removeItem(prefKey);
       // 从缓存中移除键

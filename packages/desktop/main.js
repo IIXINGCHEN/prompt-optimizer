@@ -58,6 +58,7 @@ const {
   createHistoryManager,
   createLLMService,
   createPromptService,
+  createImageUnderstandingService,
   createImageModelManager,
   createImageAdapterRegistry,
   createImageService,
@@ -66,6 +67,8 @@ const {
   createContextRepo,
   FavoriteManager,
   FileStorageProvider,
+  runStorageStartupSafetyCheck,
+  writeStartupRepairReport,
   // 导入共享的环境变量扫描常量
   CUSTOM_API_PATTERN,
   SUFFIX_PATTERN,
@@ -592,6 +595,8 @@ async function initializeServices() {
     const userDataPath = app.getPath('userData');
     console.log('[DESKTOP] Using standard user data directory for auto-update compatibility:', userDataPath);
     storageProvider = new FileStorageProvider(userDataPath);
+    const startupRepairReport = await runStorageStartupSafetyCheck(storageProvider);
+    await writeStartupRepairReport(storageProvider, startupRepairReport);
     
     await initializePreferenceService(storageProvider);
     
@@ -625,7 +630,13 @@ async function initializeServices() {
     llmService = createLLMService(modelManager);
 
     console.log('[DESKTOP] Creating Prompt service...');
-    promptService = createPromptService(modelManager, llmService, templateManager, historyManager);
+    promptService = createPromptService(
+      modelManager,
+      llmService,
+      templateManager,
+      historyManager,
+      createImageUnderstandingService(),
+    );
     console.log('[DESKTOP] Creating Image service...');
     imageService = createImageService(imageModelManager, imageAdapterRegistry);
     
@@ -1230,6 +1241,16 @@ function setupIPC() {
     }
   })
 
+  ipcMain.handle('image-generateMultiImage', async (e, request) => {
+    try {
+      const safeReq = safeSerialize(request)
+      const res = await imageService.generateMultiImage(safeReq)
+      return createSuccessResponse(res)
+    } catch (error) {
+      return createStructuredErrorResponse(error)
+    }
+  })
+
   ipcMain.handle('image-validateRequest', async (e, request) => {
     try {
       const safeReq = safeSerialize(request)
@@ -1254,6 +1275,16 @@ function setupIPC() {
     try {
       const safeReq = safeSerialize(request)
       const res = await imageService.validateImage2ImageRequest(safeReq)
+      return createSuccessResponse(res)
+    } catch (error) {
+      return createStructuredErrorResponse(error)
+    }
+  })
+
+  ipcMain.handle('image-validateMultiImageRequest', async (e, request) => {
+    try {
+      const safeReq = safeSerialize(request)
+      const res = await imageService.validateMultiImageRequest(safeReq)
       return createSuccessResponse(res)
     } catch (error) {
       return createStructuredErrorResponse(error)

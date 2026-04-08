@@ -4,7 +4,7 @@ import { computeStableImageId } from '../stores/session/imageStorageMaintenance'
 
 type ImageSourceType = 'generated' | 'uploaded'
 
-type ImagePayload = {
+export type ImagePayload = {
   b64: string
   mimeType: string
 }
@@ -25,6 +25,59 @@ const parseDataUrlPayload = (source: string): ImagePayload | null => {
   return { b64, mimeType }
 }
 
+const inferMimeTypeFromBytes = (bytes: Uint8Array): string | null => {
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a
+  ) {
+    return 'image/png'
+  }
+
+  if (
+    bytes.length >= 3 &&
+    bytes[0] === 0xff &&
+    bytes[1] === 0xd8 &&
+    bytes[2] === 0xff
+  ) {
+    return 'image/jpeg'
+  }
+
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return 'image/webp'
+  }
+
+  if (
+    bytes.length >= 6 &&
+    bytes[0] === 0x47 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x38 &&
+    (bytes[4] === 0x37 || bytes[4] === 0x39) &&
+    bytes[5] === 0x61
+  ) {
+    return 'image/gif'
+  }
+
+  return null
+}
+
 const fetchImagePayloadFromUrl = async (absoluteUrl: string): Promise<ImagePayload> => {
   const resp = await fetch(absoluteUrl, { method: 'GET' })
   if (!resp.ok) {
@@ -33,6 +86,13 @@ const fetchImagePayloadFromUrl = async (absoluteUrl: string): Promise<ImagePaylo
 
   const headerType = resp.headers.get('content-type')
   const mimeType = typeof headerType === 'string' ? headerType.split(';')[0].trim() : ''
+  const ab = await resp.arrayBuffer()
+  const bytes = new Uint8Array(ab)
+  const inferredMimeType = inferMimeTypeFromBytes(bytes)
+  const finalMimeType =
+    mimeType && mimeType !== 'application/octet-stream'
+      ? mimeType
+      : inferredMimeType || mimeType || 'application/octet-stream'
 
   type BufferLike = {
     from: (data: ArrayBuffer) => { toString: (encoding: 'base64') => string }
@@ -40,17 +100,15 @@ const fetchImagePayloadFromUrl = async (absoluteUrl: string): Promise<ImagePaylo
 
   const maybeBuffer = (globalThis as unknown as { Buffer?: BufferLike }).Buffer
   if (maybeBuffer && typeof maybeBuffer.from === 'function') {
-    const ab = await resp.arrayBuffer()
     const b64 = maybeBuffer.from(ab).toString('base64')
-    return { b64, mimeType: mimeType || 'application/octet-stream' }
+    return { b64, mimeType: finalMimeType }
   }
 
   if (typeof FileReader === 'undefined') {
     throw new Error('FileReader is not available to decode image payload')
   }
 
-  const blob = await resp.blob()
-  const actualMime = blob.type || mimeType || 'application/octet-stream'
+  const blob = new Blob([ab], { type: finalMimeType })
 
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
@@ -66,11 +124,13 @@ const fetchImagePayloadFromUrl = async (absoluteUrl: string): Promise<ImagePaylo
 
   return {
     b64: parsed.b64,
-    mimeType: parsed.mimeType || actualMime,
+    mimeType: parsed.mimeType || finalMimeType,
   }
 }
 
-const normalizePayloadFromSource = async (source: string): Promise<ImagePayload | null> => {
+export const normalizeImageSourceToPayload = async (
+  source: string,
+): Promise<ImagePayload | null> => {
   const raw = String(source || '').trim()
   if (!raw) return null
 
@@ -82,6 +142,94 @@ const normalizePayloadFromSource = async (source: string): Promise<ImagePayload 
   }
 
   return null
+}
+
+type PersistImagePayloadOptions = {
+  payload: ImagePayload
+  storageService: IImageStorageService | null | undefined
+  sourceType?: ImageSourceType
+  metadata?: {
+    prompt?: string
+    modelId?: string
+    configId?: string
+  }
+}
+
+const assertStorageQuotaForPayload = async (
+  storageService: IImageStorageService,
+  imageId: string,
+  payload: ImagePayload,
+): Promise<void> => {
+  const config = typeof storageService.getConfig === 'function'
+    ? storageService.getConfig()
+    : null
+
+  if (!config || config.quotaStrategy !== 'reject') {
+    return
+  }
+
+  const existing = await storageService.getMetadata(imageId)
+  if (existing) {
+    return
+  }
+
+  const stats = typeof storageService.getStorageStats === 'function'
+    ? await storageService.getStorageStats()
+    : null
+
+  if (!stats) {
+    return
+  }
+
+  const nextCount = stats.count + 1
+  const nextTotalBytes = stats.totalBytes + Math.floor(payload.b64.length * 0.75)
+
+  if (
+    typeof config.maxCount === 'number' &&
+    Number.isFinite(config.maxCount) &&
+    nextCount > config.maxCount
+  ) {
+    throw new Error(
+      `Image storage quota exceeded: projected count ${nextCount} exceeds maxCount ${config.maxCount}`,
+    )
+  }
+
+  if (
+    typeof config.maxCacheSize === 'number' &&
+    Number.isFinite(config.maxCacheSize) &&
+    nextTotalBytes > config.maxCacheSize
+  ) {
+    throw new Error(
+      `Image storage quota exceeded: projected size ${nextTotalBytes} exceeds maxCacheSize ${config.maxCacheSize}`,
+    )
+  }
+}
+
+export const persistImagePayloadAsAssetId = async (
+  opts: PersistImagePayloadOptions,
+): Promise<string | null> => {
+  const { payload, storageService, sourceType = 'uploaded', metadata } = opts
+  if (!storageService || !payload?.b64) return null
+
+  const imageId = await computeStableImageId(payload.b64, payload.mimeType)
+  await assertStorageQuotaForPayload(storageService, imageId, payload)
+  const existing = await storageService.getMetadata(imageId)
+  if (!existing) {
+    await storageService.saveImage({
+      metadata: {
+        id: imageId,
+        mimeType: payload.mimeType,
+        sizeBytes: Math.floor(payload.b64.length * 0.75),
+        createdAt: Date.now(),
+        accessedAt: Date.now(),
+        source: sourceType,
+        metadata,
+      },
+      data: payload.b64,
+    })
+  }
+
+  return imageId
 }
 
 type PersistImageSourceOptions = {
@@ -104,27 +252,15 @@ export const persistImageSourceAsAssetId = async (
   const { source, storageService, sourceType = 'uploaded', metadata } = opts
   if (!storageService) return null
 
-  const payload = await normalizePayloadFromSource(source)
+  const payload = await normalizeImageSourceToPayload(source)
   if (!payload) return null
 
-  const imageId = await computeStableImageId(payload.b64, payload.mimeType)
-  const existing = await storageService.getMetadata(imageId)
-  if (!existing) {
-    await storageService.saveImage({
-      metadata: {
-        id: imageId,
-        mimeType: payload.mimeType,
-        sizeBytes: Math.floor(payload.b64.length * 0.75),
-        createdAt: Date.now(),
-        accessedAt: Date.now(),
-        source: sourceType,
-        metadata,
-      },
-      data: payload.b64,
-    })
-  }
-
-  return imageId
+  return persistImagePayloadAsAssetId({
+    payload,
+    storageService,
+    sourceType,
+    metadata,
+  })
 }
 
 type PersistImageSourcesOptions = {

@@ -24,6 +24,7 @@ import { useProMultiMessageSession } from './useProMultiMessageSession'
 import { useProVariableSession } from './useProVariableSession'
 import { useImageText2ImageSession } from './useImageText2ImageSession'
 import { useImageImage2ImageSession } from './useImageImage2ImageSession'
+import { useImageMultiImageSession } from './useImageMultiImageSession'
 
 /**
  * 子模式 key 映射表
@@ -36,6 +37,48 @@ export type SubModeKey =
   | 'pro-variable'    // Pro-变量模式
   | 'image-text2image'  // 文生图
   | 'image-image2image' // 图生图
+  | 'image-multiimage' // 多图生图
+
+const SESSION_STORAGE_KEYS: Record<SubModeKey, string> = {
+  'basic-system': 'session/v1/basic-system',
+  'basic-user': 'session/v1/basic-user',
+  'pro-multi': 'session/v1/pro-multi',
+  'pro-variable': 'session/v1/pro-variable',
+  'image-text2image': 'session/v1/image-text2image',
+  'image-image2image': 'session/v1/image-image2image',
+  'image-multiimage': 'session/v1/image-multiimage',
+}
+
+const getSessionCleanupKey = (key: SubModeKey, error: unknown): string | null => {
+  if (!error || typeof error !== 'object') {
+    return null
+  }
+
+  const maybeError = error as {
+    code?: unknown
+    params?: {
+      reason?: unknown
+      key?: unknown
+    }
+  }
+
+  if (maybeError.code !== 'error.storage.read') {
+    return null
+  }
+
+  if (
+    maybeError.params?.reason !== 'session_snapshot_too_large' &&
+    maybeError.params?.reason !== 'session_referenced_image_missing'
+  ) {
+    return null
+  }
+
+  if (typeof maybeError.params.key === 'string' && maybeError.params.key.trim()) {
+    return maybeError.params.key
+  }
+
+  return SESSION_STORAGE_KEYS[key]
+}
 
 /**
  * 子模式读取器接口（从外部注入）
@@ -210,6 +253,9 @@ export const useSessionManager = defineStore('sessionManager', () => {
         case 'image-image2image':
           await useImageImage2ImageSession().saveSession()
           break
+        case 'image-multiimage':
+          await useImageMultiImageSession().saveSession()
+          break
       }
     } catch (error) {
       console.error(`[SessionManager] 保存 ${key} 会话失败:`, error)
@@ -265,9 +311,33 @@ export const useSessionManager = defineStore('sessionManager', () => {
         case 'image-image2image':
           await useImageImage2ImageSession().restoreSession()
           break
+        case 'image-multiimage':
+          await useImageMultiImageSession().restoreSession()
+          break
       }
     } catch (error) {
-      console.error(`[SessionManager] 恢复 ${key} 会话失败:`, error)
+      const cleanupKey = getSessionCleanupKey(key, error)
+      if (cleanupKey) {
+        console.info(`[SessionManager] 检测到损坏会话快照，准备清理: ${cleanupKey}`)
+      } else {
+        console.error(`[SessionManager] 恢复 ${key} 会话失败:`, error)
+      }
+
+      if (!cleanupKey) {
+        return
+      }
+
+      const $services = getPiniaServices()
+      if (!$services?.preferenceService) {
+        return
+      }
+
+      try {
+        await $services.preferenceService.delete(cleanupKey)
+        console.info(`[SessionManager] 已清理损坏会话快照: ${cleanupKey}`)
+      } catch (cleanupError) {
+        console.error(`[SessionManager] 清理损坏会话快照失败 (${cleanupKey}):`, cleanupError)
+      }
     }
   }
 
@@ -310,6 +380,7 @@ export const useSessionManager = defineStore('sessionManager', () => {
         'pro-variable',
         'image-text2image',
         'image-image2image',
+        'image-multiimage',
       ]
 
       for (const key of keys) {
@@ -362,6 +433,7 @@ export const useSessionManager = defineStore('sessionManager', () => {
         'pro-variable',
         'image-text2image',
         'image-image2image',
+        'image-multiimage',
       ]
       for (const key of keys) {
         await _saveSubModeSessionUnsafe(key)

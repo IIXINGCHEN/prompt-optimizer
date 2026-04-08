@@ -58,6 +58,9 @@ import { template as image2image_design_text_edit_optimize } from './image-optim
 import { template as image2image_design_text_edit_optimize_en } from './image-optimize/image2image/design-text-edit-optimize_en';
 import { template as image2image_json_structured_optimize } from './image-optimize/image2image/json-structured-optimize';
 import { template as image2image_json_structured_optimize_en } from './image-optimize/image2image/json-structured-optimize_en';
+// 多图生图
+import { template as multiimage_optimize } from './image-optimize/multiimage/multiimage-optimize';
+import { template as multiimage_optimize_en } from './image-optimize/multiimage/multiimage-optimize_en';
 // 图像迭代
 import { template as image_iterate_general } from './image-optimize/iterate/image-iterate-general';
 import { template as image_iterate_general_en } from './image-optimize/iterate/image-iterate-general_en';
@@ -102,6 +105,8 @@ import { template as evaluation_pro_user_prompt_iterate_en } from './evaluation/
 // 评估模板 - 图像模式/文生图
 import { template as evaluation_image_text2image_prompt_only } from './evaluation/image/text2image/evaluation-prompt-only';
 import { template as evaluation_image_text2image_prompt_only_en } from './evaluation/image/text2image/evaluation-prompt-only_en';
+import { template as evaluation_image_text2image_prompt_iterate } from './evaluation/image/text2image/evaluation-prompt-iterate';
+import { template as evaluation_image_text2image_prompt_iterate_en } from './evaluation/image/text2image/evaluation-prompt-iterate_en';
 import { template as evaluation_image_text2image_result } from './evaluation/image/text2image/evaluation-result';
 import { template as evaluation_image_text2image_result_en } from './evaluation/image/text2image/evaluation-result_en';
 import { template as evaluation_image_text2image_compare } from './evaluation/image/text2image/evaluation-compare';
@@ -186,6 +191,8 @@ export const ALL_TEMPLATES = {
   image2image_design_text_edit_optimize_en,
   image2image_json_structured_optimize,
   image2image_json_structured_optimize_en,
+  multiimage_optimize,
+  multiimage_optimize_en,
   // 图像迭代模板
   image_iterate_general,
   image_iterate_general_en,
@@ -229,6 +236,8 @@ export const ALL_TEMPLATES = {
   // 评估模板 - 图像模式/文生图
   evaluation_image_text2image_prompt_only,
   evaluation_image_text2image_prompt_only_en,
+  evaluation_image_text2image_prompt_iterate,
+  evaluation_image_text2image_prompt_iterate_en,
   evaluation_image_text2image_result,
   evaluation_image_text2image_result_en,
   evaluation_image_text2image_compare,

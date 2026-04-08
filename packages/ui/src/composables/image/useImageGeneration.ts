@@ -6,9 +6,69 @@ import type {
   ImageResult,
   ImageModelConfig,
   Text2ImageRequest,
-  Image2ImageRequest
+  Image2ImageRequest,
+  MultiImageGenerationRequest,
+  MultiImageRequest,
 } from '@prompt-optimizer/core'
 import { getI18nErrorMessage } from '../../utils/error'
+import {
+  normalizeImageSourceToPayload,
+  persistImagePayloadAsAssetId,
+} from '../../utils/image-asset-storage'
+
+const normalizeRuntimeImageResult = async (
+  result: ImageResult,
+  services: AppServices | null | undefined,
+): Promise<ImageResult> => {
+  if (!Array.isArray(result.images) || result.images.length === 0) {
+    return result
+  }
+
+  const normalizedImages = await Promise.all(
+    result.images.map(async (image) => {
+      if (!image?.url || image.b64) {
+        return image
+      }
+
+      try {
+        const payload = await normalizeImageSourceToPayload(image.url)
+        if (!payload) {
+          return image
+        }
+
+        if (services?.imageStorageService) {
+          try {
+            await persistImagePayloadAsAssetId({
+              payload,
+              storageService: services.imageStorageService,
+              sourceType: 'generated',
+              metadata: {
+                prompt: result.metadata?.prompt,
+                modelId: result.metadata?.modelId,
+                configId: result.metadata?.configId,
+              },
+            })
+          } catch (error) {
+            console.warn('[useImageGeneration] Failed to persist normalized image payload:', error)
+          }
+        }
+
+        return {
+          b64: payload.b64,
+          mimeType: payload.mimeType,
+        }
+      } catch (error) {
+        console.warn('[useImageGeneration] Failed to normalize url image result:', error)
+        return image
+      }
+    }),
+  )
+
+  return {
+    ...result,
+    images: normalizedImages,
+  }
+}
 
 export function useImageGeneration() {
   const services = inject<Ref<AppServices | null>>('services')
@@ -41,9 +101,10 @@ export function useImageGeneration() {
     progress.value = 'queued'
     try {
       const res = await call()
-      result.value = res
+      const normalized = await normalizeRuntimeImageResult(res, services?.value)
+      result.value = normalized
       progress.value = 'done'
-      return res
+      return normalized
     } catch (e) {
       // Preserve structured errors ({ code, params }) coming from core / Electron preload.
       // Do not wrap non-Error objects into Error, otherwise code/params get lost.
@@ -72,6 +133,11 @@ export function useImageGeneration() {
     return await callGenerate(() => services.value!.imageService!.generateImage2Image(req))
   }
 
+  const generateMultiImage = async (req: MultiImageGenerationRequest) => {
+    if (!services?.value?.imageService) throw new Error('Image service not available')
+    return await callGenerate(() => services.value!.imageService!.generateMultiImage(req))
+  }
+
   const validateText2ImageRequest = async (req: Text2ImageRequest) => {
     if (!services?.value?.imageService) throw new Error('Image service not available')
     await services.value.imageService.validateText2ImageRequest(req)
@@ -80,6 +146,11 @@ export function useImageGeneration() {
   const validateImage2ImageRequest = async (req: Image2ImageRequest) => {
     if (!services?.value?.imageService) throw new Error('Image service not available')
     await services.value.imageService.validateImage2ImageRequest(req)
+  }
+
+  const validateMultiImageRequest = async (req: MultiImageRequest) => {
+    if (!services?.value?.imageService) throw new Error('Image service not available')
+    await services.value.imageService.validateMultiImageRequest(req)
   }
 
   return {
@@ -92,8 +163,10 @@ export function useImageGeneration() {
     generate,
     generateText2Image,
     generateImage2Image,
+    generateMultiImage,
     validateText2ImageRequest,
     validateImage2ImageRequest,
+    validateMultiImageRequest,
     loadImageModels
   }
 }

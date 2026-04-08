@@ -326,6 +326,7 @@
                                     :disabled="
                                         isOptimizing ||
                                         !originalPrompt.trim() ||
+                                        !inputImageB64 ||
                                         !selectedTextModelKey ||
                                         !selectedTemplate
                                     "
@@ -767,6 +768,7 @@ import ImageTokenUsage from './ImageTokenUsage.vue'
 import { useWorkspaceTemplateSelection } from '../../composables/workspaces/useWorkspaceTemplateSelection'
 import { useWorkspaceTextModelSelection } from '../../composables/workspaces/useWorkspaceTextModelSelection'
 import { useElementSize } from '@vueuse/core'
+import { runTasksWithExecutionMode } from '../../utils/runTasksSequentially'
 import {
     type ContextMode,
     type ImageModelConfig,
@@ -1539,8 +1541,9 @@ const runAllVariants = async () => {
         if (!getVariantRequest(id)) return
     }
 
-    const results = await Promise.all(
-        ids.map((id) => runVariant(id, { silentSuccess: true, silentError: true, persist: false })),
+    const results = await runTasksWithExecutionMode(
+        ids,
+        async (id) => runVariant(id, { silentSuccess: true, silentError: true, persist: false }),
     )
 
     queueSessionSave()
@@ -1991,6 +1994,10 @@ const createHistoryRecord = async () => {
 // 优化提示词（流式写入 store.state）
 const handleOptimizePrompt = async () => {
     if (!originalPrompt.value.trim() || isOptimizing.value) return
+    if (!inputImageB64.value) {
+        toast.error(t('imageWorkspace.generation.inputImageRequired'))
+        return
+    }
     if (!selectedTemplate.value) {
         toast.error(t('toast.error.noOptimizeTemplate'))
         return
@@ -2016,6 +2023,12 @@ const handleOptimizePrompt = async () => {
             targetPrompt: originalPrompt.value,
             templateId: selectedTemplate.value.id,
             modelKey: selectedTextModelKey.value,
+            inputImages: [
+                {
+                    b64: inputImageB64.value,
+                    mimeType: inputImageMime.value || 'image/png',
+                },
+            ],
         }
 
         await promptService.value.optimizePromptStream(request, {

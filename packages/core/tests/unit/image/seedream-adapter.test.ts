@@ -55,6 +55,13 @@ describe('SeedreamImageAdapter', () => {
       })
     })
 
+    test('should declare multi-image capability for Seedream 4.0', () => {
+      const model = adapter.getModels()[0]
+
+      expect(model.capabilities.image2image).toBe(true)
+      expect(model.capabilities.multiImage).toBe(true)
+    })
+
     test('should include watermark and size parameters', () => {
       const models = adapter.getModels()
       const model = models[0]
@@ -227,6 +234,90 @@ describe('SeedreamImageAdapter', () => {
         })
       )
     })
+
+    test('should send multiple reference images as an image array', async () => {
+      const config: ImageModelConfig = {
+        id: 'multi-seedream-config',
+        name: 'Multi Seedream Config',
+        providerId: 'seedream',
+        modelId,
+        enabled: true,
+        connectionConfig: {
+          apiKey: 'test-api-key',
+          baseURL: 'https://ark.cn-beijing.volces.com/api/v3'
+        },
+        paramOverrides: {}
+      }
+
+      const request: ImageRequest = {
+        prompt: '将两张参考图融合成一张统一画面',
+        configId: config.id,
+        count: 1,
+        inputImages: [
+          { b64: 'AAAA', mimeType: 'image/png' },
+          { b64: 'BBBB', mimeType: 'image/jpeg' }
+        ]
+      }
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          code: 0,
+          data: [{ url: 'https://example.com/multi-image.png' }]
+        })
+      })
+
+      await adapter.generate(request, config)
+
+      expect(fetch).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          body: expect.stringContaining('"image":["data:image/png;base64,AAAA","data:image/jpeg;base64,BBBB"]')
+        })
+      )
+    })
+
+    test('should force response_format to b64_json even when stored overrides request url output', async () => {
+      const config: ImageModelConfig = {
+        id: 'seedream-b64-config',
+        name: 'Seedream B64 Config',
+        providerId: 'seedream',
+        modelId,
+        enabled: true,
+        connectionConfig: {
+          apiKey: 'test-api-key',
+          baseURL: 'https://ark.cn-beijing.volces.com/api/v3'
+        },
+        paramOverrides: {
+          response_format: 'url',
+          size: '2K'
+        }
+      }
+
+      const request: ImageRequest = {
+        prompt: '返回 base64 结果',
+        configId: config.id,
+        count: 1,
+        paramOverrides: {
+          response_format: 'url'
+        }
+      }
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          code: 0,
+          data: [{ b64_json: 'aGVsbG8=' }]
+        })
+      })
+
+      await adapter.generate(request, config)
+
+      const [, init] = vi.mocked(fetch).mock.calls[0]!
+      const body = JSON.parse(String(init?.body || '{}')) as Record<string, unknown>
+
+      expect(body.response_format).toBe('b64_json')
+    })
   })
 
   describe('Provider Capabilities', () => {
@@ -300,24 +391,9 @@ describe('SeedreamImageAdapter', () => {
 
       expect(result).toBeDefined()
       expect(result.images).toHaveLength(1)
-      expect(result.images[0].url).toBeTruthy()
-
-      // 验证图像 URL 可访问性
-      if (result.images[0].url) {
-        // Seedream 返回的签名 URL 对 HTTP method 敏感（HEAD 可能 403），用 GET 进行可达性校验
-        const response = await fetch(result.images[0].url, { method: 'GET' })
-        if (!response.ok) {
-          throw new Error(
-            `Seedream image URL fetch failed: ${response.status} ${response.statusText}`
-          )
-        }
-
-        const contentType = response.headers.get('content-type') || ''
-        expect(contentType.startsWith('image/')).toBe(true)
-
-        // 确保连接被消费/释放
-        await response.arrayBuffer()
-      }
+      expect(result.images[0].b64).toBeTruthy()
+      expect(result.images[0].mimeType).toBe('image/png')
+      expect(result.images[0].url).toBeFalsy()
     }, 45000) // 45秒超时
   })
 })

@@ -19,7 +19,7 @@ import * as crypto from 'crypto'
 /**
  * LLM API 提供商
  */
-type LLMProvider = 'openai' | 'deepseek' | 'anthropic' | 'gemini' | 'zhipu' | 'modelscope' | 'siliconflow'
+type LLMProvider = 'openai' | 'deepseek' | 'anthropic' | 'gemini' | 'zhipu' | 'modelscope' | 'siliconflow' | 'dashscope'
 
 /**
  * VCR 模式
@@ -77,6 +77,71 @@ interface VCRFixture {
   responseBody?: any
   rawSSE?: string // legacy only
   duration?: number
+}
+
+const CURRENT_TEST_VCR_FAILURE_KEY = '__PROMPT_OPTIMIZER_CURRENT_TEST_VCR_FAILURE__'
+const INLINE_IMAGE_DATA_URL_RE = /^data:image\/([a-z0-9.+-]+)(?:;charset=[^;,]+)?;base64,/iu
+const INLINE_BASE64_FIELD_KEYS = new Set(['b64', 'base64', 'b64_json', 'data'])
+const HTTP_URL_RE = /^https?:\/\//iu
+const REPLAY_PLACEHOLDER_SVG = [
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 160" width="240" height="160">',
+  '<rect width="240" height="160" fill="#f3f4f6"/>',
+  '<path d="M0 0L240 160M240 0L0 160" stroke="#cbd5e1" stroke-width="2"/>',
+  '<rect x="24" y="44" width="192" height="72" rx="12" fill="#e2e8f0" stroke="#94a3b8"/>',
+  '<text x="120" y="77" text-anchor="middle" fill="#334155" font-family="Arial, sans-serif" font-size="16">Image omitted</text>',
+  '<text x="120" y="99" text-anchor="middle" fill="#64748b" font-family="Arial, sans-serif" font-size="12">Replay placeholder</text>',
+  '</svg>',
+].join('')
+const REPLAY_PLACEHOLDER_DATA_URL = `data:image/svg+xml;base64,${Buffer.from(REPLAY_PLACEHOLDER_SVG, 'utf8').toString('base64')}`
+
+const getVCRFailureStore = (): { value: string | null } => {
+  const scopedGlobal = globalThis as typeof globalThis & {
+    [CURRENT_TEST_VCR_FAILURE_KEY]?: { value: string | null }
+  }
+
+  if (!scopedGlobal[CURRENT_TEST_VCR_FAILURE_KEY]) {
+    scopedGlobal[CURRENT_TEST_VCR_FAILURE_KEY] = { value: null }
+  }
+
+  return scopedGlobal[CURRENT_TEST_VCR_FAILURE_KEY]!
+}
+
+export function getCurrentTestVCRFailure(): string | null {
+  return getVCRFailureStore().value
+}
+
+export function throwIfCurrentTestHasVCRFailure(): void {
+  const failure = getCurrentTestVCRFailure()
+  if (failure) {
+    throw new Error(failure)
+  }
+}
+
+type WaitForConditionOptions = {
+  timeoutMs: number
+  intervalMs?: number
+  description?: string
+}
+
+export async function waitForConditionOrVCRFailure(
+  check: () => Promise<boolean> | boolean,
+  options: WaitForConditionOptions,
+): Promise<void> {
+  const { timeoutMs, intervalMs = 100, description = 'condition was not met in time' } = options
+  const startTime = Date.now()
+
+  while (Date.now() - startTime < timeoutMs) {
+    throwIfCurrentTestHasVCRFailure()
+
+    if (await check()) {
+      return
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, intervalMs))
+  }
+
+  throwIfCurrentTestHasVCRFailure()
+  throw new Error(`[VCR wait timeout] ${description}`)
 }
 
 /**
@@ -154,6 +219,7 @@ class E2EVCR {
     this.currentTestCase = testCase
     this.recordingEnabled = await this.shouldRecord()
     this.replayConsumedByHash = new Map()
+    getVCRFailureStore().value = null
 
     // In explicit record mode, always start from a clean fixture file to avoid mixing old interactions.
     if (this.config.mode === 'record') {
@@ -245,6 +311,7 @@ class E2EVCR {
     if (url.includes('open.bigmodel.cn')) return 'zhipu'
     if (url.includes('modelscope.cn')) return 'modelscope'
     if (url.includes('api.siliconflow.cn')) return 'siliconflow'
+    if (url.includes('dashscope.aliyuncs.com')) return 'dashscope'
     return null
   }
 
@@ -267,24 +334,205 @@ class E2EVCR {
     return JSON.stringify(value)
   }
 
+  private isLikelyInlineBase64(value: string): boolean {
+    const trimmed = value.trim()
+    if (trimmed.length < 64) return false
+    return /^[a-z0-9+/=_\r\n-]+$/i.test(trimmed)
+  }
+
+  private normalizePromptTemplateText(content: string, role?: string): string {
+    const normalized = content.replace(/\r\n/g, '\n').trim()
+
+    if (role === 'system') {
+      const roleMatch = normalized.match(/^# Role:\s*(.+)$/m)
+      if (roleMatch) {
+        return `__system_role:${roleMatch[1].trim()}__`
+      }
+    }
+
+    const imageEvidenceMatch = normalized.match(
+      /Image-to-Image modification-request evidence \(JSON\):\s*([\s\S]*?)\n\nPlease output/i,
+    )
+    if (imageEvidenceMatch) {
+      try {
+        const parsedEvidence = JSON.parse(imageEvidenceMatch[1].trim())
+        if (typeof parsedEvidence?.originalPrompt === 'string' && parsedEvidence.originalPrompt.trim()) {
+          return parsedEvidence.originalPrompt.trim()
+        }
+
+        return this.stableStringify(this.normalizeRequestValue(parsedEvidence))
+      } catch {
+        return imageEvidenceMatch[1].trim()
+      }
+    }
+
+    const legacyRequestMatch = normalized.match(
+      /Modification request to optimize:\s*([\s\S]*?)\n\nPlease output/i,
+    )
+    if (legacyRequestMatch) {
+      return legacyRequestMatch[1].trim()
+    }
+
+    return normalized
+  }
+
+  private normalizeChatMessageContent(content: any, role: string): any {
+    if (typeof content === 'string') {
+      return this.normalizePromptTemplateText(content, role)
+    }
+
+    if (Array.isArray(content)) {
+      const textParts = content
+        .map((item) => {
+          if (typeof item === 'string') return item
+          if (!item || typeof item !== 'object') return ''
+          if (item.type === 'text' && typeof item.text === 'string') return item.text
+          return ''
+        })
+        .filter(Boolean)
+
+      const joinedText = textParts.join('\n\n').trim()
+      return joinedText ? this.normalizePromptTemplateText(joinedText, role) : ''
+    }
+
+    return this.normalizeRequestValue(content)
+  }
+
+  private normalizeRequestValue(value: any, key?: string): any {
+    if (typeof value === 'string') {
+      const inlineImageMatch = value.match(INLINE_IMAGE_DATA_URL_RE)
+      if (inlineImageMatch) {
+        return `__inline_image_data_url_${inlineImageMatch[1].toLowerCase()}__`
+      }
+
+      if (key && INLINE_BASE64_FIELD_KEYS.has(key.toLowerCase()) && this.isLikelyInlineBase64(value)) {
+        return '__inline_image_base64__'
+      }
+
+      return value
+    }
+
+    if (Array.isArray(value)) {
+      return value.map((item) => this.normalizeRequestValue(item, key))
+    }
+
+    if (value && typeof value === 'object') {
+      if (Array.isArray((value as { messages?: any[] }).messages)) {
+        const normalizedMessages = (value as { messages: any[] }).messages.map((message) => {
+          const role = typeof message?.role === 'string' ? message.role : 'unknown'
+          return {
+            ...message,
+            content: this.normalizeChatMessageContent(message?.content, role),
+          }
+        })
+
+        return Object.fromEntries(
+          Object.entries(value).map(([entryKey, entryValue]) => [
+            entryKey,
+            entryKey === 'messages' ? normalizedMessages : this.normalizeRequestValue(entryValue, entryKey),
+          ]),
+        )
+      }
+
+      return Object.fromEntries(
+        Object.entries(value).map(([entryKey, entryValue]) => [
+          entryKey,
+          this.normalizeRequestValue(entryValue, entryKey),
+        ]),
+      )
+    }
+
+    return value
+  }
+
   private computeRequestHash(provider: LLMProvider, url: string, method: string, requestBody: any): string {
     // Normalize url: for some providers, query params (e.g. cache busters) should not affect matching.
     const normalizedUrl = url.split('?')[0]
-
-    // Image2Image requests can embed huge base64 strings; avoid hashing raw bytes.
-    // The hash only needs to distinguish interactions within a test run.
-    const normalizedBody = (() => {
-      if (!requestBody || typeof requestBody !== 'object') return requestBody
-      const cloned = JSON.parse(JSON.stringify(requestBody))
-      const b64 = cloned?.inputImage?.b64
-      if (typeof b64 === 'string' && b64.length > 0) {
-        cloned.inputImage.b64 = `__b64_len_${b64.length}__`
-      }
-      return cloned
-    })()
+    const normalizedBody = this.normalizeRequestValue(requestBody)
 
     const payload = `${provider}|${method}|${normalizedUrl}|${this.stableStringify(normalizedBody)}`
     return crypto.createHash('sha256').update(payload).digest('hex')
+  }
+
+  private rewriteReplayImageEntry(value: any): any {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return value
+    }
+
+    if (
+      typeof value.b64 === 'string' ||
+      typeof value.b64_json === 'string' ||
+      typeof value.base64 === 'string'
+    ) {
+      return value
+    }
+
+    const rawUrl = typeof value.url === 'string' ? value.url.trim() : ''
+    if (!HTTP_URL_RE.test(rawUrl)) {
+      return value
+    }
+
+    return {
+      ...value,
+      url: REPLAY_PLACEHOLDER_DATA_URL,
+    }
+  }
+
+  private rewriteReplayImageGenerationPayload(value: any): any {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return value
+    }
+
+    let changed = false
+    const next = { ...value }
+
+    for (const key of ['images', 'data']) {
+      const items = (value as Record<string, any>)[key]
+      if (!Array.isArray(items)) {
+        continue
+      }
+
+      const rewrittenItems = items.map((item) => {
+        const rewrittenItem = this.rewriteReplayImageEntry(item)
+        if (rewrittenItem !== item) {
+          changed = true
+        }
+        return rewrittenItem
+      })
+
+      next[key] = rewrittenItems
+    }
+
+    return changed ? next : value
+  }
+
+  private getReplayFulfillBody(interaction: VCRInteraction): string {
+    const contentType = interaction.responseHeaders?.['content-type'] || 'application/json'
+    if (!/[/+]json\b/i.test(contentType)) {
+      return interaction.rawBody || ''
+    }
+
+    const parsedBody =
+      interaction.responseBody && typeof interaction.responseBody === 'object'
+        ? interaction.responseBody
+        : (() => {
+            try {
+              return JSON.parse(interaction.rawBody || '')
+            } catch {
+              return null
+            }
+          })()
+
+    if (!parsedBody) {
+      return interaction.rawBody || ''
+    }
+
+    const rewrittenBody = this.rewriteReplayImageGenerationPayload(parsedBody)
+    if (rewrittenBody === parsedBody && interaction.rawBody) {
+      return interaction.rawBody
+    }
+
+    return JSON.stringify(rewrittenBody)
   }
 
   private normalizeFixture(fixture: VCRFixture | null): VCRFixture {
@@ -297,6 +545,14 @@ class E2EVCR {
           it.responseHeaders = it.responseHeaders || { 'content-type': 'text/event-stream' }
           delete it.rawSSE
         }
+
+        const normalizedMethod = typeof it.method === 'string' && it.method ? it.method : 'POST'
+        const normalizedRequestBody = this.normalizeRequestValue(it.requestBody)
+
+        it.method = normalizedMethod
+        it.requestBody = normalizedRequestBody
+        it.requestHash = this.computeRequestHash(it.provider, it.url, normalizedMethod, normalizedRequestBody)
+        it.status = Number(it.status ?? 200)
       }
       return fixture
     }
@@ -305,7 +561,7 @@ class E2EVCR {
     if (fixture && (fixture as any).rawSSE) {
       const legacyProvider = (fixture as any).provider as LLMProvider
       const legacyUrl = (fixture as any).url as string
-      const legacyRequestBody = (fixture as any).requestBody
+      const legacyRequestBody = this.normalizeRequestValue((fixture as any).requestBody)
       const legacyMethod = 'POST'
       const legacyRequestHash = this.computeRequestHash(legacyProvider, legacyUrl, legacyMethod, legacyRequestBody)
 
@@ -370,22 +626,7 @@ class E2EVCR {
       interactions: [...existing.interactions],
     }
 
-    const sanitizedBody = (() => {
-      try {
-        // Keep the fixture small: drop huge base64 payloads.
-        if (requestBody && typeof requestBody === 'object') {
-          const cloned = JSON.parse(JSON.stringify(requestBody))
-          const b64 = cloned?.inputImage?.b64
-          if (typeof b64 === 'string' && b64.length > 0) {
-            cloned.inputImage.b64 = `__b64_len_${b64.length}__`
-          }
-          return cloned
-        }
-      } catch {
-        // ignore
-      }
-      return requestBody
-    })()
+    const sanitizedBody = this.normalizeRequestValue(requestBody)
 
     fixture.interactions.push({
       provider,
@@ -432,6 +673,54 @@ class E2EVCR {
     return this.normalizeFixture(raw)
   }
 
+  private async writeMismatchDebugArtifact(payload: {
+    requestHash: string
+    provider: LLMProvider
+    url: string
+    method: string
+    requestBody: any
+    fixture: VCRFixture
+  }): Promise<string | null> {
+    try {
+      const debugDir = path.join(process.cwd(), 'test-results', 'vcr-debug')
+      await fs.mkdir(debugDir, { recursive: true })
+
+      const filename = `${this.sanitizeFilename(this.currentTestName)}-${this.sanitizeFilename(this.currentTestCase)}-mismatch.json`
+      const debugPath = path.join(debugDir, filename)
+
+      const candidateInteractions = payload.fixture.interactions
+        .filter((interaction) => interaction.provider === payload.provider && interaction.method === payload.method && interaction.url.split('?')[0] === payload.url.split('?')[0])
+        .map((interaction, index) => ({
+          index,
+          requestHash: interaction.requestHash,
+          requestBody: interaction.requestBody,
+        }))
+
+      await fs.writeFile(
+        debugPath,
+        JSON.stringify(
+          {
+            testName: this.currentTestName,
+            testCase: this.currentTestCase,
+            requestHash: payload.requestHash,
+            provider: payload.provider,
+            url: payload.url,
+            method: payload.method,
+            requestBody: payload.requestBody,
+            candidateInteractions,
+          },
+          null,
+          2,
+        ),
+        'utf-8',
+      )
+
+      return path.relative(process.cwd(), debugPath)
+    } catch {
+      return null
+    }
+  }
+
   private findReplayInteraction(fixture: VCRFixture, requestHash: string): VCRInteraction | null {
     const consumedCount = this.replayConsumedByHash.get(requestHash) ?? 0
     const candidates = fixture.interactions.filter((it) => it.requestHash === requestHash)
@@ -462,6 +751,7 @@ class E2EVCR {
       /https:\/\/open\.bigmodel\.cn\/.*/,
       /https:\/\/.*\.modelscope\.cn\/.*/,
       /https:\/\/api\.siliconflow\.cn\/.*/,
+      /https:\/\/dashscope\.aliyuncs\.com\/.*/,
     ]
 
     for (const pattern of apiPatterns) {
@@ -554,7 +844,8 @@ class E2EVCR {
 
             const hasSSE = /(^|\n)\s*data:\s*/.test(responseBody)
 
-            let rawSSE = responseBody
+            let rawBody = responseBody
+            let responseContentType = contentType || 'application/json'
             let responseJson: any = null
 
             if (hasSSE) {
@@ -594,69 +885,15 @@ class E2EVCR {
                   }]
                 }
               }
+
+              rawBody = responseBody
+              responseContentType = 'text/event-stream'
             } else {
-              // 非 SSE 响应：尝试解析为 JSON，并合成一份可回放的 SSE
-              // 目的：让回放模式不依赖真实 API 的流式实现细节
+              // 非 SSE 响应：保持原始 JSON 载荷与 content-type，确保 record/replay 语义一致。
               try {
-                const parsed = JSON.parse(responseBody)
-                responseJson = parsed
-
-                const content =
-                  parsed?.choices?.[0]?.message?.content ??
-                  parsed?.choices?.[0]?.delta?.content ??
-                  parsed?.content ??
-                  ''
-
-                const created = parsed?.created ?? Math.floor(Date.now() / 1000)
-                const id = parsed?.id ?? `vcr_${created}`
-                const model = parsed?.model ?? 'unknown'
-
-                const baseChunk = {
-                  id,
-                  object: 'chat.completion.chunk',
-                  created,
-                  model,
-                  choices: [{
-                    index: 0,
-                    delta: { role: 'assistant', content: '' },
-                    logprobs: null,
-                    finish_reason: null,
-                  }]
-                }
-
-                const contentChunk = {
-                  id,
-                  object: 'chat.completion.chunk',
-                  created,
-                  model,
-                  choices: [{
-                    index: 0,
-                    delta: { content: String(content) },
-                    logprobs: null,
-                    finish_reason: null,
-                  }]
-                }
-
-                const endChunk = {
-                  id,
-                  object: 'chat.completion.chunk',
-                  created,
-                  model,
-                  choices: [{
-                    index: 0,
-                    delta: {},
-                    logprobs: null,
-                    finish_reason: 'stop',
-                  }]
-                }
-
-                rawSSE =
-                  `data: ${JSON.stringify(baseChunk)}\n\n` +
-                  `data: ${JSON.stringify(contentChunk)}\n\n` +
-                  `data: ${JSON.stringify(endChunk)}\n\n` +
-                  `data: [DONE]\n\n`
+                responseJson = JSON.parse(responseBody)
               } catch {
-                throw new Error('[VCR] LLM API 返回非流式响应，且无法解析为 JSON')
+                responseJson = null
               }
             }
 
@@ -666,11 +903,9 @@ class E2EVCR {
                 JSON.parse(requestBody || '{}'),
                 responseJson,
                 endTime - startTime,
-                rawSSE,
+                rawBody,
                 {
-                  // rawSSE 在这里要么是原始 SSE，要么是我们为非流式 JSON 合成的 SSE。
-                  // replay 时必须按 SSE 回放，否则浏览器端会把 `data: ...` 当 JSON 解析而失败。
-                  'content-type': 'text/event-stream',
+                  'content-type': responseContentType,
                 },
                 method,
                 response.status
@@ -708,6 +943,9 @@ class E2EVCR {
               // 直接返回原始 SSE 文本（格式完全一致）
               const contentType = interaction.responseHeaders?.['content-type'] || 'application/json'
               const isSSE = /text\/event-stream/i.test(contentType)
+              const responseBody = isSSE
+                ? interaction.rawBody || ''
+                : this.getReplayFulfillBody(interaction)
 
               await route.fulfill({
                 status: interaction.status || 200,
@@ -723,20 +961,46 @@ class E2EVCR {
                   'access-control-allow-origin': '*',
                   'access-control-allow-headers': '*',
                 },
-                body: interaction.rawBody || ''
+                body: responseBody
               })
             } else {
-              if (mode === 'replay') {
-                // replay 模式：没有 fixture 则失败
-                const errorMsg =
-                  `[VCR] ❌ Fixture not found for test: ${this.currentTestName} - ${this.currentTestCase}\n` +
-                  `Request hash: ${requestHash} (${provider} ${method} ${url.split('?')[0]})\n` +
-                  `Run with E2E_VCR_MODE=record to create it.`
+              const shouldFailFast = mode === 'replay' || !this.recordingEnabled
 
+              if (shouldFailFast) {
+                const debugArtifact = await this.writeMismatchDebugArtifact({
+                  requestHash,
+                  provider,
+                  url: url.split('?')[0],
+                  method,
+                  requestBody: parsedRequestBody,
+                  fixture,
+                })
+                const errorMsg =
+                  `[VCR] ❌ Fixture interaction not found for test: ${this.currentTestName} - ${this.currentTestCase}\n` +
+                  `Request hash: ${requestHash} (${provider} ${method} ${url.split('?')[0]})\n` +
+                  `A fixture file already exists for this test, but it does not match the current request.\n` +
+                  `${debugArtifact ? `Debug artifact: ${debugArtifact}\n` : ''}` +
+                  `Run with E2E_VCR_MODE=record to refresh it.`
+
+                getVCRFailureStore().value = errorMsg
                 console.error(errorMsg)
-                await route.abort()
+                await route.fulfill({
+                  status: 400,
+                  headers: {
+                    'content-type': 'application/json',
+                    'access-control-allow-origin': '*',
+                    'access-control-allow-headers': '*',
+                  },
+                  body: JSON.stringify({
+                    error: {
+                      type: 'invalid_request_error',
+                      code: 'vcr_fixture_mismatch',
+                      message: errorMsg,
+                    },
+                  }),
+                })
               } else {
-                // auto 模式：降级到真实 API
+                // auto 模式且当前测试尚无 fixture：允许退回真实 API，以便首次录制
                 console.log(
                   `[VCR] ⚠️  No fixture for requestHash=${requestHash} (${provider} ${method} ${url.split('?')[0]}), calling real API`,
                 )
