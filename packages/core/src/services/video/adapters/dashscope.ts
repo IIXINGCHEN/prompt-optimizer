@@ -70,6 +70,42 @@ export class DashScopeVideoAdapter extends AbstractVideoProviderAdapter {
         parameterDefinitions: this.getParameterDefinitions('wanx2.1-i2v-turbo'),
         defaultParameterValues: this.getDefaultParameterValues('wanx2.1-i2v-turbo'),
       },
+      {
+        id: 'wan2.2-i2v-plus',
+        name: 'Wan 2.2 I2V Plus (1080P 高清增强)',
+        description: 'Aliyun Wan 2.2 enhanced quality image-to-video foundation model',
+        providerId: 'dashscope',
+        capabilities: {
+          image2video: true,
+          text2video: false,
+          endFrame: false,
+          cameraControl: false,
+          motionStrength: false,
+          supportedDurations: [5],
+          supportedRatios: ['16:9', '9:16', '1:1'],
+          supportedResolutions: ['1080p', '720p'],
+        },
+        parameterDefinitions: this.getParameterDefinitions('wan2.2-i2v-plus'),
+        defaultParameterValues: this.getDefaultParameterValues('wan2.2-i2v-plus'),
+      },
+      {
+        id: 'wan2.6-i2v',
+        name: 'Wan 2.6 I2V (旗舰高保真模型)',
+        description: 'Aliyun Wan 2.6 latest generation image-to-video model with highest fidelity',
+        providerId: 'dashscope',
+        capabilities: {
+          image2video: true,
+          text2video: false,
+          endFrame: false,
+          cameraControl: false,
+          motionStrength: false,
+          supportedDurations: [5],
+          supportedRatios: ['16:9', '9:16', '1:1'],
+          supportedResolutions: ['1080p', '720p'],
+        },
+        parameterDefinitions: this.getParameterDefinitions('wan2.6-i2v'),
+        defaultParameterValues: this.getDefaultParameterValues('wan2.6-i2v'),
+      },
     ]
   }
 
@@ -143,6 +179,14 @@ export class DashScopeVideoAdapter extends AbstractVideoProviderAdapter {
       modelId = 'wanx2.1-i2v-turbo'
     } else if (modelId.startsWith('wan2.1-')) {
       modelId = modelId.replace('wan2.1-', 'wanx2.1-')
+    }
+
+    if (!parameters.resolution) {
+      if (modelId.includes('2.2') || modelId.includes('2.6')) {
+        parameters.resolution = '1080P'
+      } else {
+        parameters.resolution = '720P'
+      }
     }
 
     const payload: Record<string, any> = {
@@ -314,10 +358,11 @@ export class DashScopeVideoAdapter extends AbstractVideoProviderAdapter {
     return this.normalizeBaseUrl(rawBase)
   }
 
-  private resolveInputImage(ref: { b64?: string; url?: string }): string {
+  private resolveInputImage(ref: { b64?: string; url?: string; mimeType?: string }): string {
     if (ref.url && ref.url.trim()) return ref.url.trim()
     if (ref.b64 && ref.b64.trim()) {
-      return ref.b64.startsWith('data:') ? ref.b64 : `data:image/png;base64,${ref.b64}`
+      const mime = ref.mimeType || 'image/png'
+      return ref.b64.startsWith('data:') ? ref.b64 : `data:${mime};base64,${ref.b64}`
     }
     throw new VideoError(VIDEO_ERROR_CODES.INPUT_IMAGE_REQUIRED, 'Valid input image required')
   }
