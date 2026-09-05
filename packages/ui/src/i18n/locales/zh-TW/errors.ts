@@ -101,6 +101,27 @@ const messages = {
       "model_only_supports_image2image_need_input": "目前模型僅支援圖生圖，請提供輸入圖像: {modelName}",
       "generation_failed": "圖像生成失敗: {details}"
     },
+    "video": {
+      "prompt_empty": "影片提示詞不能為空",
+      "config_id_empty": "影片模型設定ID不能為空",
+      "config_not_found": "未找到影片模型設定",
+      "config_not_enabled": "影片模型設定未啟用: {configName}，請先在模型管理中設定 API Key 並啟用此模型",
+      "provider_not_found": "未找到影片提供商: {providerId}",
+      "input_image_required": "圖生影片需要提供首幀影像",
+      "input_image_url_not_supported": "首幀影像不支援 URL 格式",
+      "input_image_b64_required": "首幀影像缺少 Base64 資料",
+      "input_image_invalid_format": "首幀影像格式無效",
+      "input_image_too_large": "首幀影像檔案過大（最大 10MB）",
+      "end_image_invalid": "尾幀影像資料無效",
+      "model_not_support_image2video": "目前模型不支援圖生影片: {modelName}",
+      "model_not_support_end_frame": "目前模型不支援首尾雙幀: {modelName}",
+      "task_submission_failed": "影片任務提交失敗: {details}",
+      "task_polling_failed": "影片任務狀態輪詢失敗: {details}",
+      "task_timeout": "影片生成逾時（已等待超過 10 分鐘）",
+      "task_cancelled": "影片生成任務已取消",
+      "task_failed": "影片生成失敗: {details}",
+      "generation_failed": "影片生成失敗: {details}"
+    },
     "context": {
       "not_found": "上下文不存在: {context}",
       "minimum_violation": "無法刪除最後一個上下文",

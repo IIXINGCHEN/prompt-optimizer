@@ -64,6 +64,7 @@ export const useVideoImage2VideoSession = defineStore('session-video-image2video
   const versionId = ref('')
 
   const inputImageB64 = ref<string | null>(null)
+  const inputImageId = ref<string | null>(null)
   const inputImageMime = ref<string | null>(null)
   const endImageB64 = ref<string | null>(null)
   const endImageMime = ref<string | null>(null)
@@ -103,6 +104,7 @@ export const useVideoImage2VideoSession = defineStore('session-video-image2video
     optimizedPrompt.value = ''
     reasoning.value = ''
     inputImageB64.value = null
+    inputImageId.value = null
     inputImageMime.value = null
     endImageB64.value = null
     endImageMime.value = null
@@ -114,15 +116,42 @@ export const useVideoImage2VideoSession = defineStore('session-video-image2video
   const saveSession = async () => {
     const $services = getPiniaServices()
     if (!$services?.preferenceService) return
+
+    let imageIdToSave = inputImageId.value
+    if (inputImageB64.value && $services.imageStorageService) {
+      if (!imageIdToSave) {
+        try {
+          const id = `img_v_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+          const raw = inputImageB64.value.startsWith('data:')
+            ? inputImageB64.value.split(',')[1]
+            : inputImageB64.value
+          await $services.imageStorageService.saveImage({
+            metadata: {
+              id,
+              mimeType: inputImageMime.value || 'image/png',
+              sizeBytes: Math.floor(raw.length * 0.75),
+              createdAt: Date.now(),
+              accessedAt: Date.now(),
+              source: 'uploaded',
+            },
+            data: raw,
+          })
+          imageIdToSave = id
+          inputImageId.value = id
+        } catch (e) {
+          console.warn('[VideoSession] Failed to persist input image to storage:', e)
+        }
+      }
+    }
+
     const snapshot = {
       originalPrompt: originalPrompt.value,
       optimizedPrompt: optimizedPrompt.value,
       reasoning: reasoning.value,
       chainId: chainId.value,
       versionId: versionId.value,
-      inputImageB64: inputImageB64.value,
+      inputImageId: imageIdToSave,
       inputImageMime: inputImageMime.value,
-      endImageB64: endImageB64.value,
       endImageMime: endImageMime.value,
       selectedTextModelKey: selectedTextModelKey.value,
       selectedTemplateId: selectedTemplateId.value,
@@ -151,8 +180,23 @@ export const useVideoImage2VideoSession = defineStore('session-video-image2video
         if (data.reasoning !== undefined) reasoning.value = data.reasoning
         if (data.chainId !== undefined) chainId.value = data.chainId
         if (data.versionId !== undefined) versionId.value = data.versionId
-        if (data.inputImageB64 !== undefined) inputImageB64.value = data.inputImageB64
-        if (data.inputImageMime !== undefined) inputImageMime.value = data.inputImageMime
+        if (data.inputImageId) {
+          inputImageId.value = data.inputImageId
+          if ($services.imageStorageService) {
+            try {
+              const fullImg = await $services.imageStorageService.getImage(data.inputImageId)
+              if (fullImg) {
+                inputImageB64.value = `data:${fullImg.metadata.mimeType || 'image/png'};base64,${fullImg.data}`
+                inputImageMime.value = fullImg.metadata.mimeType || 'image/png'
+              }
+            } catch (e) {
+              console.warn('[VideoSession] Failed to restore input image from storage:', e)
+            }
+          }
+        } else if (data.inputImageB64) {
+          inputImageB64.value = data.inputImageB64
+          inputImageMime.value = data.inputImageMime || 'image/png'
+        }
         if (data.endImageB64 !== undefined) endImageB64.value = data.endImageB64
         if (data.endImageMime !== undefined) endImageMime.value = data.endImageMime
         if (data.selectedTextModelKey !== undefined) selectedTextModelKey.value = data.selectedTextModelKey

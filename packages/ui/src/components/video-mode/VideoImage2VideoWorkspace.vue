@@ -295,7 +295,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, inject, type Ref } from 'vue'
+import { ref, computed, onMounted, inject, watch, type Ref } from 'vue'
 import {
   NFlex,
   NCard,
@@ -331,6 +331,7 @@ const { t } = useI18n()
 const toast = useToast()
 const session = useVideoImage2VideoSession()
 const services = inject<Ref<AppServices | null>>('services')
+const appOpenModelManager = inject<((tab?: string) => void) | null>('openModelManager', null)
 
 const splitRootRef = ref<HTMLDivElement | null>(null)
 const firstFrameInputRef = ref<HTMLInputElement | null>(null)
@@ -532,6 +533,14 @@ const runVariant = async (id: VideoTestVariantId) => {
     toast.error(t('video.config.selectModel'))
     return
   }
+
+  const config = await services?.value?.videoModelManager?.getConfig(configId)
+  if (config && !config.enabled) {
+    toast.warning(t('video.config.notEnabledWarning', { name: config.name || configId }))
+    appOpenModelManager?.('video')
+    return
+  }
+
   if (!session.inputImageB64) {
     toast.error(t('videoWorkspace.input.selectFirstFrame'))
     return
@@ -634,7 +643,7 @@ const loadModels = async () => {
       }
       const videoConfigs = await services.value.videoModelManager.getAllConfigs()
       videoModelOptions.value = videoConfigs.map((c: VideoModelConfig) => ({
-        label: c.name || c.id,
+        label: c.enabled ? (c.name || c.id) : `${c.name || c.id} (${t('video.config.notConfiguredTag')})`,
         value: c.id,
       }))
       if (videoModelOptions.value[0]) {
@@ -647,6 +656,16 @@ const loadModels = async () => {
     } catch {}
   }
 }
+
+watch(
+  () => services?.value,
+  (newServices) => {
+    if (newServices) {
+      void loadModels()
+    }
+  },
+  { immediate: true }
+)
 
 onMounted(async () => {
   await loadModels()

@@ -101,6 +101,27 @@ const messages = {
       "model_only_supports_image2image_need_input": "Model only supports image-to-image. Please provide an input image: {modelName}",
       "generation_failed": "Image generation failed: {details}"
     },
+    "video": {
+      "prompt_empty": "Video prompt cannot be empty",
+      "config_id_empty": "Video model config ID cannot be empty",
+      "config_not_found": "Video model config not found",
+      "config_not_enabled": "Video model config is not enabled: {configName}. Please configure an API Key in Model Manager and enable it.",
+      "provider_not_found": "Video provider not found: {providerId}",
+      "input_image_required": "Image-to-Video requires an initial frame image",
+      "input_image_url_not_supported": "Initial frame image URL is not supported",
+      "input_image_b64_required": "Initial frame image base64 data required",
+      "input_image_invalid_format": "Invalid initial frame image format",
+      "input_image_too_large": "Initial frame image is too large (max 10MB)",
+      "end_image_invalid": "Invalid end frame image",
+      "model_not_support_image2video": "Current model does not support image-to-video: {modelName}",
+      "model_not_support_end_frame": "Current model does not support first and end frames: {modelName}",
+      "task_submission_failed": "Video task submission failed: {details}",
+      "task_polling_failed": "Video task polling failed: {details}",
+      "task_timeout": "Video generation timed out",
+      "task_cancelled": "Video generation was cancelled",
+      "task_failed": "Video generation failed: {details}",
+      "generation_failed": "Video generation failed: {details}"
+    },
     "context": {
       "not_found": "Context not found: {context}",
       "minimum_violation": "Cannot remove the last context",

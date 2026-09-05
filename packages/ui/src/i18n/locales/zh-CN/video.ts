@@ -33,7 +33,9 @@ const messages = {
       "selectModel": "选择或输入模型名称",
       "addSuccess": "添加视频模型成功",
       "updateSuccess": "更新视频模型成功",
-      "deleteSuccess": "删除视频模型成功"
+      "deleteSuccess": "删除视频模型成功",
+      "notEnabledWarning": "视频模型「{name}」尚未配置 API Key 或未启用，已为您打开视频模型配置。",
+      "notConfiguredTag": "需配置API Key"
     },
     "connection": {
       "testing": "正在测试连接...",

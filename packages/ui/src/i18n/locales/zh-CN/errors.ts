@@ -101,6 +101,27 @@ const messages = {
       "model_only_supports_image2image_need_input": "当前模型仅支持图生图，请提供输入图像: {modelName}",
       "generation_failed": "图像生成失败: {details}"
     },
+    "video": {
+      "prompt_empty": "视频提示词不能为空",
+      "config_id_empty": "视频模型配置ID不能为空",
+      "config_not_found": "未找到视频模型配置",
+      "config_not_enabled": "视频模型配置未启用: {configName}，请先在模型管理中配置 API Key 并启用此模型",
+      "provider_not_found": "未找到视频提供商: {providerId}",
+      "input_image_required": "图生视频需要提供首帧图片",
+      "input_image_url_not_supported": "首帧图片不支持 URL 格式",
+      "input_image_b64_required": "首帧图片缺少 Base64 数据",
+      "input_image_invalid_format": "首帧图片格式无效",
+      "input_image_too_large": "首帧图片文件过大（最大 10MB）",
+      "end_image_invalid": "尾帧图片数据无效",
+      "model_not_support_image2video": "当前模型不支持图生视频: {modelName}",
+      "model_not_support_end_frame": "当前模型不支持首尾双帧: {modelName}",
+      "task_submission_failed": "视频任务提交失败: {details}",
+      "task_polling_failed": "视频任务状态轮询失败: {details}",
+      "task_timeout": "视频生成超时（已等待超过 10 分钟）",
+      "task_cancelled": "视频生成任务已取消",
+      "task_failed": "视频生成失败: {details}",
+      "generation_failed": "视频生成失败: {details}"
+    },
     "context": {
       "not_found": "上下文不存在: {context}",
       "minimum_violation": "无法删除最后一个上下文",

@@ -450,6 +450,15 @@ export function useAppInitializer(): {
           console.warn('[AppInitializer] ImageModelManager ensureInitialized failed (non-critical):', e)
         }
 
+        // Ensure video model defaults are seeded
+        try {
+          if (typeof videoModelManagerInstance.ensureInitialized === 'function') {
+            await videoModelManagerInstance.ensureInitialized()
+          }
+        } catch (e) {
+          console.warn('[AppInitializer] VideoModelManager ensureInitialized failed (non-critical):', e)
+        }
+
         // 创建 CompareService（直接使用）
         const compareService = createCompareService();
 

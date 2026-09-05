@@ -33,7 +33,9 @@ const messages = {
       "selectModel": "Select or enter model name",
       "addSuccess": "Video model added successfully",
       "updateSuccess": "Video model updated successfully",
-      "deleteSuccess": "Video model deleted successfully"
+      "deleteSuccess": "Video model deleted successfully",
+      "notEnabledWarning": "Video model \"{name}\" is not enabled or lacks an API Key. Opening Video Model Manager...",
+      "notConfiguredTag": "Needs API Key"
     },
     "connection": {
       "testing": "Testing connection...",
