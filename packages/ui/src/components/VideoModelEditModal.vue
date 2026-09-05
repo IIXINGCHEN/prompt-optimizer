@@ -54,6 +54,11 @@
               v-model:value="formData.connectionConfig.baseURL"
               :placeholder="selectedProvider.defaultBaseURL || 'https://...'"
             />
+            <template #feedback>
+              <span v-if="formData.providerId === 'dashscope'" style="font-size: 12px; color: var(--text-color-3, #999);">
+                {{ t('video.config.dashscopeBaseUrlHint') }}
+              </span>
+            </template>
           </NFormItem>
 
           <NSpace align="center" style="margin-bottom: 16px;">

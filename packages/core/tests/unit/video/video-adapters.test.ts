@@ -60,6 +60,39 @@ describe('DashScopeVideoAdapter', () => {
     )
   })
 
+  it('gracefully falls back to official DashScope endpoint when text compatible-mode URL is provided', async () => {
+    config.connectionConfig = {
+      apiKey: process.env.DASHSCOPE_API_KEY || 'test-key',
+      baseURL: 'https://llm-lppkyf39n2jpxvg5.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
+    }
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        output: {
+          task_id: 'ds-task-999',
+          task_status: 'PENDING',
+        },
+      }),
+    })
+    vi.stubGlobal('fetch', mockFetch)
+
+    const res = await adapter.submitTask(
+      {
+        prompt: 'Camera panning right',
+        configId: config.id,
+        inputImage: { b64: 'base64-data' },
+      },
+      config
+    )
+
+    expect(res.taskId).toBe('ds-task-999')
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://dashscope.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis',
+      expect.anything()
+    )
+  })
+
   it('automatically maps aspectRatio 16:9 to size 1280*720', async () => {
     let capturedBody: any
     const mockFetch = vi.fn().mockImplementation(async (_url, opts) => {

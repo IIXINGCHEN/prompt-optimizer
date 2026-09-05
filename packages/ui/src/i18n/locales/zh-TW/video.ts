@@ -35,7 +35,8 @@ const messages = {
       "updateSuccess": "更新影片模型成功",
       "deleteSuccess": "刪除影片模型成功",
       "notEnabledWarning": "影片模型「{name}」尚未設定 API Key 或未啟用，已為您開啟影片模型設定。",
-      "notConfiguredTag": "需設定API Key"
+      "notConfiguredTag": "需設定API Key",
+      "dashscopeBaseUrlHint": "預設留空即可（自動使用百煉官方原生端點 https://dashscope.aliyuncs.com/api/v1）。請勿填寫文字模型的 compatible-mode/v1 位址。"
     },
     "connection": {
       "testing": "正在測試連線...",

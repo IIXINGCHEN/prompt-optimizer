@@ -266,6 +266,26 @@ export class DashScopeVideoAdapter extends AbstractVideoProviderAdapter {
     return task
   }
 
+  protected override resolveBaseUrl(config: VideoModelConfig): string {
+    const rawBase = (config.connectionConfig?.baseURL || '').trim()
+    if (!rawBase) {
+      return this.getProvider().defaultBaseURL!
+    }
+    // Defensive check: If user configured an OpenAI-compatible text endpoint
+    // like .../compatible-mode/v1 or private LLM gateway, fallback to official DashScope AIGC endpoint
+    if (
+      rawBase.includes('compatible-mode') ||
+      rawBase.includes('/v1/chat') ||
+      (rawBase.includes('.maas.aliyuncs.com') && !rawBase.includes('dashscope.aliyuncs.com'))
+    ) {
+      console.warn(
+        `[DashScope] Incompatible text baseURL detected (${rawBase}). Video generation requires native DashScope endpoint. Falling back to default: ${this.getProvider().defaultBaseURL}`
+      )
+      return this.getProvider().defaultBaseURL!
+    }
+    return this.normalizeBaseUrl(rawBase)
+  }
+
   private resolveInputImage(ref: { b64?: string; url?: string }): string {
     if (ref.url && ref.url.trim()) return ref.url.trim()
     if (ref.b64 && ref.b64.trim()) {

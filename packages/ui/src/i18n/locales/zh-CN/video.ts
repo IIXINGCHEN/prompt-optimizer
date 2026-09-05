@@ -35,7 +35,8 @@ const messages = {
       "updateSuccess": "更新视频模型成功",
       "deleteSuccess": "删除视频模型成功",
       "notEnabledWarning": "视频模型「{name}」尚未配置 API Key 或未启用，已为您打开视频模型配置。",
-      "notConfiguredTag": "需配置API Key"
+      "notConfiguredTag": "需配置API Key",
+      "dashscopeBaseUrlHint": "默认留空即可（自动使用百炼官方原生端点 https://dashscope.aliyuncs.com/api/v1）。请勿填写文本模型的 compatible-mode/v1 地址。"
     },
     "connection": {
       "testing": "正在测试连接...",

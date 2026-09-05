@@ -35,7 +35,8 @@ const messages = {
       "updateSuccess": "Video model updated successfully",
       "deleteSuccess": "Video model deleted successfully",
       "notEnabledWarning": "Video model \"{name}\" is not enabled or lacks an API Key. Opening Video Model Manager...",
-      "notConfiguredTag": "Needs API Key"
+      "notConfiguredTag": "Needs API Key",
+      "dashscopeBaseUrlHint": "Leave empty by default (auto-uses official https://dashscope.aliyuncs.com/api/v1). Do not use text model compatible-mode/v1 endpoints."
     },
     "connection": {
       "testing": "Testing connection...",
