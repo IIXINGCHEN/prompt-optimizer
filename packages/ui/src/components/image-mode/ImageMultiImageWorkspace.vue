@@ -1901,6 +1901,7 @@ type TemplateEntryType =
   | 'text2imageOptimize'
   | 'image2imageOptimize'
   | 'multiimageOptimize'
+  | 'videoIterate'
   | 'imageIterate'
 
 const appOpenTemplateManager = inject<((type?: TemplateEntryType) => void) | null>('openTemplateManager', null)

@@ -60,6 +60,12 @@ const routes: RouteRecordRaw[] = [
     name: 'image-multiimage',
     component: () => import('../components/image-mode/ImageMultiImageWorkspace.vue')
   },
+  // ✨ Video 模式：图生视频独立路由
+  {
+    path: '/video/image2video',
+    name: 'video-image2video',
+    component: () => import('../components/video-mode/VideoImage2VideoWorkspace.vue')
+  },
   {
     path: '/favorites',
     name: 'favorites',

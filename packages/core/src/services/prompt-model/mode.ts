@@ -2,6 +2,7 @@ import type {
   BasicPromptContract,
   ImagePromptContract,
   ProPromptContract,
+  VideoPromptContract,
   PromptContract,
   PromptInputSlot,
   PromptModeKey,
@@ -17,20 +18,23 @@ export const PROMPT_MODE_KEYS = [
   'image-text2image',
   'image-image2image',
   'image-multiimage',
+  'video-image2video',
 ] as const satisfies readonly PromptModeKey[];
 
 export type FavoriteModeCompat = {
-  functionMode: 'basic' | 'context' | 'image';
+  functionMode: 'basic' | 'context' | 'image' | 'video';
   optimizationMode?: 'system' | 'user';
   imageSubMode?: 'text2image' | 'image2image' | 'multiimage';
+  videoSubMode?: 'image2video';
 };
 
 export type LegacyPromptModeInput = {
-  functionMode?: 'basic' | 'context' | 'pro' | 'image' | string;
+  functionMode?: 'basic' | 'context' | 'pro' | 'image' | 'video' | string;
   optimizationMode?: 'system' | 'user' | string;
   imageSubMode?: 'text2image' | 'image2image' | 'multiimage' | string;
+  videoSubMode?: 'image2video' | string;
   proSubMode?: 'multi' | 'variable' | 'conversation' | string;
-  subMode?: 'system' | 'user' | 'multi' | 'variable' | 'conversation' | string;
+  subMode?: 'system' | 'user' | 'multi' | 'variable' | 'conversation' | 'image2video' | string;
 };
 
 export type CreatePromptContractOptions = {
@@ -63,6 +67,10 @@ export const resolvePromptModeKey = (input: LegacyPromptModeInput): PromptModeKe
     return `image-${normalizeImageSubMode(input.imageSubMode)}` as PromptModeKey;
   }
 
+  if (functionMode === 'video') {
+    return 'video-image2video';
+  }
+
   if (functionMode === 'context') {
     return optimizationMode === 'user' ? 'pro-variable' : 'pro-conversation';
   }
@@ -88,6 +96,8 @@ export const promptModeKeyToFavoriteMode = (modeKey: PromptModeKey): FavoriteMod
       return { functionMode: 'image', imageSubMode: 'image2image' };
     case 'image-multiimage':
       return { functionMode: 'image', imageSubMode: 'multiimage' };
+    case 'video-image2video':
+      return { functionMode: 'video', videoSubMode: 'image2video' };
     case 'basic-system':
     default:
       return { functionMode: 'basic', optimizationMode: 'system' };
@@ -149,6 +159,13 @@ export const createPromptContract = (
         subMode: 'multiimage',
         modeKey,
       } satisfies ImagePromptContract;
+    case 'video-image2video':
+      return {
+        ...base,
+        family: 'video',
+        subMode: 'image2video',
+        modeKey,
+      } satisfies VideoPromptContract;
     case 'basic-system':
     default:
       return {

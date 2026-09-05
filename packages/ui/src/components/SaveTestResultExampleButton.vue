@@ -45,9 +45,10 @@ const props = withDefaults(defineProps<{
   variantId: string
   content: string
   originalContent?: string
-  functionMode: 'basic' | 'context' | 'image'
+  functionMode: 'basic' | 'context' | 'image' | 'video'
   optimizationMode?: 'system' | 'user'
   imageSubMode?: 'text2image' | 'image2image' | 'multiimage'
+  videoSubMode?: 'image2video'
   disabled?: boolean
   testId?: string
 }>(), {

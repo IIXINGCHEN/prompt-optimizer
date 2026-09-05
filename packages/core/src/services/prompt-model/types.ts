@@ -12,9 +12,10 @@ export type PromptModeKey =
   | 'pro-conversation'
   | 'image-text2image'
   | 'image-image2image'
-  | 'image-multiimage';
+  | 'image-multiimage'
+  | 'video-image2video';
 
-export type PromptModeFamily = 'basic' | 'pro' | 'image';
+export type PromptModeFamily = 'basic' | 'pro' | 'image' | 'video';
 
 export type PromptVariableType = 'string' | 'number' | 'boolean' | 'enum';
 
@@ -40,7 +41,7 @@ export interface PromptInputSlot {
   metadata?: Record<string, unknown>;
 }
 
-export type PromptOutputKind = 'text' | 'message' | 'image' | 'images' | 'json' | 'custom';
+export type PromptOutputKind = 'text' | 'message' | 'image' | 'images' | 'video' | 'json' | 'custom';
 
 export interface PromptOutputSpec {
   id: string;
@@ -76,7 +77,23 @@ export interface ImagePromptContract extends PromptContractBase {
   modeKey: 'image-text2image' | 'image-image2image' | 'image-multiimage';
 }
 
-export type PromptContract = BasicPromptContract | ProPromptContract | ImagePromptContract;
+export interface VideoPromptContract extends PromptContractBase {
+  family: 'video';
+  subMode: 'image2video';
+  modeKey: 'video-image2video';
+}
+
+export type PromptContract = BasicPromptContract | ProPromptContract | ImagePromptContract | VideoPromptContract;
+
+export type PromptVideoRef =
+  | {
+      kind: 'url';
+      url: string;
+    }
+  | {
+      kind: 'asset';
+      assetId: string;
+    };
 
 export type PromptContent =
   | {
@@ -91,6 +108,12 @@ export type PromptContent =
       kind: 'image-prompt';
       text: string;
       images?: PromptImageRef[];
+    }
+  | {
+      kind: 'video-prompt';
+      text: string;
+      images?: PromptImageRef[];
+      video?: PromptVideoRef;
     };
 
 export type PromptImageRef =
@@ -119,12 +142,14 @@ export interface PromptRunInput {
   messages?: ConversationMessage[];
   parameters?: Record<string, string>;
   images?: PromptImageRef[];
+  video?: PromptVideoRef;
   metadata?: Record<string, unknown>;
 }
 
 export interface PromptRunOutput {
   text?: string;
   images?: PromptImageRef[];
+  video?: PromptVideoRef;
   metadata?: Record<string, unknown>;
 }
 
@@ -233,7 +258,7 @@ export interface PromptRootSnapshot {
 }
 
 export interface PromptOptimizationTarget {
-  kind: 'prompt' | 'message' | 'image-prompt' | 'custom';
+  kind: 'prompt' | 'message' | 'image-prompt' | 'video-prompt' | 'custom';
   id?: string;
   role?: string;
   label?: string;

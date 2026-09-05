@@ -345,7 +345,7 @@ import {
 
 // Types
 import type { ModelSelectOption, TestAreaPanelInstance } from '../../types'
-import { type IPromptService, type PromptAssetBinding, type PromptSessionOrigin, type PromptRecordChain, type PatchOperation, type Template, type TemplateType, type FunctionMode, type BasicSubMode, type ProSubMode, type ImageSubMode, type OptimizationMode, type ConversationMessage, type ToolDefinition, type ContextEditorState, type ContextMode, type FavoritePrompt } from "@prompt-optimizer/core";
+import { type IPromptService, type PromptAssetBinding, type PromptSessionOrigin, type PromptRecordChain, type PatchOperation, type Template, type TemplateType, type FunctionMode, type BasicSubMode, type ProSubMode, type ImageSubMode, type VideoSubMode, type OptimizationMode, type ConversationMessage, type ToolDefinition, type ContextEditorState, type ContextMode, type FavoritePrompt } from "@prompt-optimizer/core";
 
 // 1. 基础 composables
 const hljsInstance = hljs;
@@ -528,6 +528,8 @@ const parseRouteInfo = (path = activeWorkspaceContextPath.value) => {
       (functionMode === 'pro' ? subMode : 'variable') as 'multi' | 'variable',
     imageSubMode:
       (functionMode === 'image' ? subMode : 'text2image') as 'text2image' | 'image2image' | 'multiimage',
+    videoSubMode:
+      (functionMode === 'video' ? subMode : 'image2video') as 'image2video',
     isValid: true,
     canonicalPath: workspaceRoute.path,
   }
@@ -538,6 +540,7 @@ const routeFunctionMode = computed<FunctionMode>(() => parseRouteInfo().function
 const routeBasicSubMode = computed<BasicSubMode>(() => parseRouteInfo().basicSubMode)
 const routeProSubMode = computed<ProSubMode>(() => parseRouteInfo().proSubMode)
 const routeImageSubMode = computed<ImageSubMode>(() => parseRouteInfo().imageSubMode)
+const routeVideoSubMode = computed<VideoSubMode>(() => parseRouteInfo().videoSubMode)
 
 // ========== GlobalSettings 初始化 Gate（避免 restore 前渲染/纠错） ==========
 // 目的：确保 PreferenceService 注入后先 restoreGlobalSettings，再允许 UI 渲染/执行部分 watch
@@ -585,6 +588,9 @@ watch(
     if (routeInfo.functionMode === 'image' && routeInfo.imageSubMode !== globalSettings.state.imageSubMode) {
       globalSettings.updateImageSubMode(routeInfo.imageSubMode)
     }
+    if (routeInfo.functionMode === 'video' && routeInfo.videoSubMode !== globalSettings.state.videoSubMode) {
+      globalSettings.updateVideoSubMode(routeInfo.videoSubMode)
+    }
   }
 )
 
@@ -597,6 +603,7 @@ sessionManager.injectSubModeReaders({
   getBasicSubMode: () => routeBasicSubMode.value,
   getProSubMode: () => routeProSubMode.value,
   getImageSubMode: () => routeImageSubMode.value,
+  getVideoSubMode: () => routeVideoSubMode.value,
 });
 
 // 5. Initialize i18n with storage when services are ready

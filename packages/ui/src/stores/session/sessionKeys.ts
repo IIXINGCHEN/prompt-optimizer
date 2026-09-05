@@ -10,6 +10,7 @@ export const SESSION_SUB_MODE_KEYS = [
   'image-text2image',
   'image-image2image',
   'image-multiimage',
+  'video-image2video',
 ] as const satisfies readonly SubModeKey[]
 
 export const SESSION_STORAGE_KEYS: Record<SubModeKey, string> = {
@@ -20,4 +21,5 @@ export const SESSION_STORAGE_KEYS: Record<SubModeKey, string> = {
   'image-text2image': 'session/v1/image-text2image',
   'image-image2image': 'session/v1/image-image2image',
   'image-multiimage': 'session/v1/image-multiimage',
+  'video-image2video': 'session/v1/video-image2video',
 }

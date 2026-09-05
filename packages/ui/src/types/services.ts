@@ -20,7 +20,11 @@ import type {
   IEvaluationService,
   IVariableExtractionService,
   IVariableValueGenerationService,
-  IImageStorageService
+  IImageStorageService,
+  IVideoModelManager,
+  IVideoService,
+  IVideoAdapterRegistry,
+  IVideoStorageService
 } from '@prompt-optimizer/core'
 
 /**
@@ -50,6 +54,11 @@ export interface AppServices {
   imageStorageService?: IImageStorageService;
   // 收藏快照图像存储（与 session 图像存储隔离）
   favoriteImageStorageService?: IImageStorageService;
+  // 🆕 视频相关（可选）
+  videoModelManager?: IVideoModelManager;
+  videoService?: IVideoService;
+  videoAdapterRegistry?: IVideoAdapterRegistry;
+  videoStorageService?: IVideoStorageService;
   // 🆕 评估服务（可选）
   evaluationService?: IEvaluationService;
   // 🆕 变量提取服务（可选）

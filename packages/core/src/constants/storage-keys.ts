@@ -9,6 +9,7 @@
 export const CORE_SERVICE_KEYS = {
   MODELS: "models", // 模型配置存储键
   IMAGE_MODELS: "image-models", // 图像模型配置存储键
+  VIDEO_MODELS: "video-models", // 视频模型配置存储键
   USER_TEMPLATES: "user-templates", // 用户模板存储键
   PROMPT_HISTORY: "prompt_history", // 提示词历史记录存储键
 } as const;
@@ -20,10 +21,11 @@ export const UI_SETTINGS_KEYS = {
   BUILTIN_TEMPLATE_LANGUAGE: "app:settings:ui:builtin-template-language",
   FUNCTION_MODE: "app:settings:ui:function-mode",
 
-  // 子模式持久化（三种功能模式独立存储）
+  // 子模式持久化（各功能模式独立存储）
   BASIC_SUB_MODE: "app:settings:ui:basic-sub-mode", // 基础模式的子模式（system/user）
   PRO_SUB_MODE: "app:settings:ui:pro-sub-mode", // Pro 模式的子模式（multi/variable）
-  IMAGE_SUB_MODE: "app:settings:ui:image-sub-mode", // 图像模式的子模式（text2image/image2image）
+  IMAGE_SUB_MODE: "app:settings:ui:image-sub-mode", // 图像模式的子模式（text2image/image2image/multiimage）
+  VIDEO_SUB_MODE: "app:settings:ui:video-sub-mode", // 视频模式的子模式（image2video）
 } as const;
 
 // 模型选择相关
@@ -46,6 +48,15 @@ export const IMAGE_MODE_KEYS = {
   SELECTED_TEMPLATE_IMAGE2IMAGE: "app:image-mode:selected-template:image2image",
   SELECTED_ITERATE_TEMPLATE: "app:image-mode:selected-iterate-template",
   COMPARE_MODE_ENABLED: "app:image-mode:compare-mode-enabled",
+} as const;
+
+// 视频模式选择相关
+export const VIDEO_MODE_KEYS = {
+  SELECTED_TEXT_MODEL: "app:video-mode:selected-text-model",
+  SELECTED_VIDEO_MODEL: "app:video-mode:selected-video-model",
+  SELECTED_TEMPLATE_IMAGE2VIDEO: "app:video-mode:selected-template:image2video",
+  SELECTED_ITERATE_TEMPLATE: "app:video-mode:selected-iterate-template",
+  COMPARE_MODE_ENABLED: "app:video-mode:compare-mode-enabled",
 } as const;
 
 // 功能模型配置相关
@@ -77,6 +88,7 @@ export const ALL_STORAGE_KEYS = {
   ...UI_SETTINGS_KEYS,
   ...TEMPLATE_SELECTION_KEYS,
   ...IMAGE_MODE_KEYS,
+  ...VIDEO_MODE_KEYS,
   ...FUNCTION_MODEL_KEYS,
 } as const;
 
@@ -92,6 +104,8 @@ export type TemplateSelectionKey =
   (typeof TEMPLATE_SELECTION_KEYS)[keyof typeof TEMPLATE_SELECTION_KEYS];
 export type ImageModeKey =
   (typeof IMAGE_MODE_KEYS)[keyof typeof IMAGE_MODE_KEYS];
+export type VideoModeKey =
+  (typeof VIDEO_MODE_KEYS)[keyof typeof VIDEO_MODE_KEYS];
 export type FunctionModelKey =
   (typeof FUNCTION_MODEL_KEYS)[keyof typeof FUNCTION_MODEL_KEYS];
 export type StorageKey =

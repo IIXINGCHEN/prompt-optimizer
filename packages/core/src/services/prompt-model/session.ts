@@ -28,6 +28,7 @@ export const LEGACY_SESSION_SUB_MODE_KEYS = [
   'image-text2image',
   'image-image2image',
   'image-multiimage',
+  'video-image2video',
 ] as const;
 
 export type LegacySessionSubModeKey = typeof LEGACY_SESSION_SUB_MODE_KEYS[number];

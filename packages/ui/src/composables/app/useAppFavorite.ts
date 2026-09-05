@@ -61,9 +61,10 @@ export interface SaveFavoriteData {
         description?: string
         category?: string
         tags?: string[]
-        functionMode?: 'basic' | 'context' | 'image'
+        functionMode?: 'basic' | 'context' | 'image' | 'video'
         optimizationMode?: OptimizationMode
         imageSubMode?: 'text2image' | 'image2image' | 'multiimage'
+        videoSubMode?: 'image2video'
         metadata?: Record<string, unknown>
         reproducibilityDraft?: FavoriteReproducibilityDraft
         updateIntent?: 'content' | 'examples'
@@ -77,9 +78,10 @@ export interface FavoriteItem {
     id?: string
     title?: string
     content: string
-    functionMode?: 'basic' | 'pro' | 'image' | 'context'
+    functionMode?: 'basic' | 'pro' | 'image' | 'context' | 'video'
     optimizationMode?: OptimizationMode
     imageSubMode?: 'text2image' | 'image2image' | 'multiimage'
+    videoSubMode?: 'image2video'
     metadata?: Record<string, unknown>
 }
 
@@ -154,9 +156,10 @@ export interface AppFavoriteOptions {
     optimizerCurrentVersions?: Ref<PromptRecordChain['versions']>
     getFavoriteImageStorageService?: () => IImageStorageService | null
     getFavoriteManager?: () => IFavoriteManager | null
-    getCurrentFunctionMode?: () => 'basic' | 'pro' | 'context' | 'image'
+    getCurrentFunctionMode?: () => 'basic' | 'pro' | 'context' | 'image' | 'video'
     getCurrentOptimizationMode?: () => OptimizationMode
     getCurrentImageSubMode?: () => 'text2image' | 'image2image' | 'multiimage'
+    getCurrentVideoSubMode?: () => 'image2video'
 }
 
 /**
@@ -340,7 +343,7 @@ export function useAppFavorite(options: AppFavoriteOptions): AppFavoriteReturn {
      * 处理保存收藏请求
      */
     const getSessionForCurrentMode = (
-        functionMode: 'basic' | 'pro' | 'context' | 'image',
+        functionMode: 'basic' | 'pro' | 'context' | 'image' | 'video',
         optimizationMode: OptimizationMode,
         imageSubMode?: 'text2image' | 'image2image' | 'multiimage',
     ): TemporaryVariablesSessionApi | null => {
@@ -358,7 +361,7 @@ export function useAppFavorite(options: AppFavoriteOptions): AppFavoriteReturn {
     }
 
     const getAssetBindingSessionForMode = (
-        functionMode: 'basic' | 'pro' | 'context' | 'image',
+        functionMode: 'basic' | 'pro' | 'context' | 'image' | 'video',
         optimizationMode: OptimizationMode,
         imageSubMode?: 'text2image' | 'image2image' | 'multiimage',
     ): AssetBindingSessionApi | null => {
@@ -375,8 +378,8 @@ export function useAppFavorite(options: AppFavoriteOptions): AppFavoriteReturn {
         const currentFunctionMode = getCurrentFunctionMode?.() || 'basic'
         const currentOptimizationMode = getCurrentOptimizationMode?.() || 'system'
         const currentImageSubMode = getCurrentImageSubMode?.() || 'text2image'
-        const favoriteFunctionMode = data.prefill?.functionMode || (currentFunctionMode === 'image' ? 'image' : currentFunctionMode === 'pro' || currentFunctionMode === 'context' ? 'context' : 'basic')
-        const favoriteOptimizationMode = favoriteFunctionMode === 'image'
+        const favoriteFunctionMode = data.prefill?.functionMode || (currentFunctionMode === 'video' ? 'video' : currentFunctionMode === 'image' ? 'image' : currentFunctionMode === 'pro' || currentFunctionMode === 'context' ? 'context' : 'basic')
+        const favoriteOptimizationMode = (favoriteFunctionMode === 'image' || favoriteFunctionMode === 'video')
             ? undefined
             : data.prefill?.optimizationMode || currentOptimizationMode
         const favoriteImageSubMode = favoriteFunctionMode === 'image'

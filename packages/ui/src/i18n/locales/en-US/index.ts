@@ -6,6 +6,7 @@ import templates from './templates'
 import testing from './testing'
 import context from './context'
 import image from './image'
+import video from './video'
 import errors from './errors'
 
 const messages = {
@@ -17,6 +18,7 @@ const messages = {
   ...testing,
   ...context,
   ...image,
+  ...video,
   ...errors,
 } as const;
 

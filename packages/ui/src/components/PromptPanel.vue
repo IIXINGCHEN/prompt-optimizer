@@ -390,9 +390,9 @@ const props = defineProps({
         type: Boolean,
         default: false,
     },
-    // 🆕 允许外部指定迭代模板类型（基础/上下文/图像），默认保持原行为
+    // 🆕 允许外部指定迭代模板类型（基础/上下文/图像/视频），默认保持原行为
     iterateTemplateType: {
-        type: String as () => "iterate" | "contextIterate" | "imageIterate",
+        type: String as () => "iterate" | "contextIterate" | "imageIterate" | "videoIterate",
         default: undefined,
     },
     // 是否显示预览按钮
@@ -561,6 +561,7 @@ const emit = defineEmits<{
             | "userOptimize"
             | "iterate"
             | "imageIterate"
+            | "videoIterate"
             | "contextIterate",
     ];
     "update:selectedIterateTemplate": [template: Template | null];
@@ -580,13 +581,14 @@ const emit = defineEmits<{
 
 const showIterateInput = ref(false);
 const iterateInput = ref("");
-const templateType = computed<"iterate" | "contextIterate" | "imageIterate">(
+const templateType = computed<"iterate" | "contextIterate" | "imageIterate" | "videoIterate">(
     () => {
         return (
             (props.iterateTemplateType as
                 | "iterate"
                 | "contextIterate"
-                | "imageIterate") ||
+                | "imageIterate"
+                | "videoIterate") ||
             (props.advancedModeEnabled ? "contextIterate" : "iterate")
         );
     },

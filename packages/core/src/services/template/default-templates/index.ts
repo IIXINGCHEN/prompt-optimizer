@@ -71,6 +71,16 @@ import { template as multiimage_optimize_en } from './image-optimize/multiimage/
 import { template as image_iterate_general } from './image-optimize/iterate/image-iterate-general';
 import { template as image_iterate_general_en } from './image-optimize/iterate/image-iterate-general_en';
 
+// 视频优化与迭代模板
+import { template as image2video_general_optimize } from './video-optimize/image2video/general-optimize';
+import { template as image2video_general_optimize_en } from './video-optimize/image2video/general-optimize_en';
+import { template as image2video_cinematic_optimize } from './video-optimize/image2video/cinematic-optimize';
+import { template as image2video_cinematic_optimize_en } from './video-optimize/image2video/cinematic-optimize_en';
+import { template as image2video_character_motion_optimize } from './video-optimize/image2video/character-motion-optimize';
+import { template as image2video_character_motion_optimize_en } from './video-optimize/image2video/character-motion-optimize_en';
+import { template as video_iterate_general } from './video-optimize/iterate/video-iterate-general';
+import { template as video_iterate_general_en } from './video-optimize/iterate/video-iterate-general_en';
+
 // 评估模板 - 基础模式/系统提示词
 import { template as evaluation_basic_system_result } from './evaluation/basic/system/evaluation-result';
 import { template as evaluation_basic_system_result_en } from './evaluation/basic/system/evaluation-result_en';
@@ -211,6 +221,15 @@ export const ALL_TEMPLATES = {
   // 图像迭代模板
   image_iterate_general,
   image_iterate_general_en,
+  // 视频优化与迭代模板
+  image2video_general_optimize,
+  image2video_general_optimize_en,
+  image2video_cinematic_optimize,
+  image2video_cinematic_optimize_en,
+  image2video_character_motion_optimize,
+  image2video_character_motion_optimize_en,
+  video_iterate_general,
+  video_iterate_general_en,
   // 评估模板 - 基础模式/系统提示词
   evaluation_basic_system_result,
   evaluation_basic_system_result_en,

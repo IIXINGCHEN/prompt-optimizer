@@ -1951,6 +1951,7 @@ type TemplateEntryType =
     | "contextIterate"
     | "text2imageOptimize"
     | "image2imageOptimize"
+    | "videoIterate"
     | "imageIterate";
 
 const appOpenTemplateManager = inject<

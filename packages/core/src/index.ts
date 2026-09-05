@@ -289,3 +289,6 @@ export { VariableExtractionService, createVariableExtractionService } from './se
 export * from './services/variable-value-generation/types'
 export * from './services/variable-value-generation/errors'
 export { VariableValueGenerationService, createVariableValueGenerationService } from './services/variable-value-generation/service'
+
+// 🆕 导出视频服务相关
+export * from './services/video'

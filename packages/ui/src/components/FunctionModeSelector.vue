@@ -30,6 +30,14 @@
     >
       {{ t('nav.imageMode') }}
     </NRadioButton>
+    <NRadioButton
+      data-testid="function-mode-video"
+      value="video"
+      :title="t('nav.videoMode')"
+      @click="handleModeClick('video')"
+    >
+      {{ t('nav.videoMode') }}
+    </NRadioButton>
   </NRadioGroup>
 </template>
 
@@ -40,13 +48,13 @@ import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
 
 interface Props {
-  modelValue: 'basic' | 'pro' | 'image'
+  modelValue: 'basic' | 'pro' | 'image' | 'video'
   allowReselect?: boolean
 }
 
 interface Emits {
-  (e: 'update:modelValue', value: 'basic' | 'pro' | 'image'): void
-  (e: 'change', value: 'basic' | 'pro' | 'image'): void
+  (e: 'update:modelValue', value: 'basic' | 'pro' | 'image' | 'video'): void
+  (e: 'change', value: 'basic' | 'pro' | 'image' | 'video'): void
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -57,12 +65,12 @@ const emit = defineEmits<Emits>()
 /**
  * 更新功能模式
  */
-const updateFunctionMode = (mode: 'basic' | 'pro' | 'image') => {
+const updateFunctionMode = (mode: 'basic' | 'pro' | 'image' | 'video') => {
   emit('update:modelValue', mode)
   emit('change', mode)
 }
 
-const handleModeClick = (mode: 'basic' | 'pro' | 'image') => {
+const handleModeClick = (mode: 'basic' | 'pro' | 'image' | 'video') => {
   if (props.allowReselect && props.modelValue === mode) {
     emit('change', mode)
   }

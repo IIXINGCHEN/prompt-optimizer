@@ -3,6 +3,7 @@ const messages = {
     "title": "模型管理",
     "textModels": "文字模型",
     "imageModels": "圖像模型",
+    "videoModels": "影片模型",
     "functionModels": "功能模型",
     "modelList": "模型清單",
     "testConnection": "測試連線",
@@ -21,6 +22,7 @@ const messages = {
     "getApiKey": "獲取API金鑰",
     "addModel": "新增",
     "addImageModel": "新增圖像模型",
+    "addVideoModel": "新增影片模型",
     "provider": {
       "section": "提供商配置",
       "label": "提供商",

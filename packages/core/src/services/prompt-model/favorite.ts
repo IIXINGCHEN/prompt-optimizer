@@ -362,7 +362,7 @@ const messagesToComparableText = (messages: ConversationMessage[]): string =>
     .join('\n\n');
 
 export const promptContentToFavoriteContent = (content: PromptAsset['versions'][number]['content']): string => {
-  if (content.kind === 'text' || content.kind === 'image-prompt') {
+  if (content.kind === 'text' || content.kind === 'image-prompt' || content.kind === 'video-prompt') {
     return content.text;
   }
 
@@ -378,6 +378,10 @@ const promptContentEquals = (
   }
 
   if (left.kind === 'image-prompt' && right.kind === 'image-prompt') {
+    return left.text === right.text;
+  }
+
+  if (left.kind === 'video-prompt' && right.kind === 'video-prompt') {
     return left.text === right.text;
   }
 

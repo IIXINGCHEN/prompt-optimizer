@@ -439,16 +439,17 @@ interface Props {
   mode?: 'create' | 'save' | 'edit'
   content?: string
   originalContent?: string
-  currentFunctionMode?: 'basic' | 'context' | 'pro' | 'image'
+  currentFunctionMode?: 'basic' | 'context' | 'pro' | 'image' | 'video'
   currentOptimizationMode?: 'system' | 'user'
   prefill?: {
     title?: string
     description?: string
     category?: string
     tags?: string[]
-    functionMode?: 'basic' | 'context' | 'image'
+    functionMode?: 'basic' | 'context' | 'image' | 'video'
     optimizationMode?: 'system' | 'user'
     imageSubMode?: 'text2image' | 'image2image' | 'multiimage'
+    videoSubMode?: 'image2video'
     metadata?: Record<string, unknown>
     reproducibilityDraft?: FavoriteReproducibilityDraft
     updateIntent?: 'content' | 'examples'

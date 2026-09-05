@@ -682,14 +682,17 @@ const props = defineProps<{
     | 'text2imageOptimize'
     | 'image2imageOptimize'
     | 'multiimageOptimize'
+    | 'image2videoOptimize'
+    | 'videoIterate'
     | 'imageIterate'
     | 'conversationMessageOptimize'
     | 'contextUserOptimize'
-   | 'contextIterate',
+    | 'contextIterate',
   show: boolean
   basicSubMode?: 'system' | 'user'
   proSubMode?: 'multi' | 'variable'
   imageSubMode?: 'text2image' | 'image2image' | 'multiimage'
+  videoSubMode?: 'image2video'
 }>()
 
 const emit = defineEmits(['close', 'select', 'update:show', 'languageChanged'])

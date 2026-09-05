@@ -43,6 +43,14 @@
             :allow-reselect="allowWorkspaceReselect"
             @change="handleImageSubModeChange"
         />
+
+        <!-- 子模式选择器 - 视频模式 -->
+        <VideoModeSelector
+            v-if="functionMode === 'video'"
+            :modelValue="videoSubMode"
+            :allow-reselect="allowWorkspaceReselect"
+            @change="handleVideoSubModeChange"
+        />
     </NSpace>
 </template>
 
@@ -68,7 +76,8 @@ import { NSpace } from 'naive-ui'
 import FunctionModeSelector from '../FunctionModeSelector.vue'
 import OptimizationModeSelectorUI from '../OptimizationModeSelector.vue'
 import ImageModeSelector from '../image-mode/ImageModeSelector.vue'
-import type { FunctionMode, BasicSubMode, ProSubMode, ImageSubMode } from '@prompt-optimizer/core'
+import VideoModeSelector from '../video-mode/VideoModeSelector.vue'
+import type { FunctionMode, BasicSubMode, ProSubMode, ImageSubMode, VideoSubMode } from '@prompt-optimizer/core'
 
 type SubMode = BasicSubMode | ProSubMode
 
@@ -92,6 +101,7 @@ const functionMode = computed<FunctionMode>(() => {
     if (path.startsWith('/basic')) return 'basic'
     if (path.startsWith('/pro')) return 'pro'
     if (path.startsWith('/image')) return 'image'
+    if (path.startsWith('/video')) return 'video'
     return 'basic' // 默认
 })
 
@@ -132,6 +142,14 @@ const imageSubMode = computed<ImageSubMode>(() => {
     return 'text2image' // 默认值
 })
 
+const videoSubMode = computed<VideoSubMode>(() => {
+    const rawSubMode = activeWorkspacePath.value.split('/')[2]
+    if (rawSubMode === 'image2video') {
+        return rawSubMode as VideoSubMode
+    }
+    return 'image2video' // 默认值
+})
+
 // ========================
 // 导航处理
 // ========================
@@ -139,7 +157,8 @@ const imageSubMode = computed<ImageSubMode>(() => {
 const DEFAULT_SUB_MODES = {
     basic: 'system',
     pro: 'variable',
-    image: 'text2image'
+    image: 'text2image',
+    video: 'image2video'
 } as const
 
 const navigateToWorkspacePath = (path: string) => {
@@ -173,5 +192,9 @@ const handleProSubModeChange = (mode: SubMode) => {
 
 const handleImageSubModeChange = (mode: ImageSubMode) => {
     navigateToWorkspacePath(`/image/${mode}`)
+}
+
+const handleVideoSubModeChange = (mode: VideoSubMode) => {
+    navigateToWorkspacePath(`/video/${mode}`)
 }
 </script>

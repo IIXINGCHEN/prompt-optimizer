@@ -3,6 +3,7 @@ const messages = {
     "title": "Model Manager",
     "textModels": "Text Models",
     "imageModels": "Image Models",
+    "videoModels": "Video Models",
     "functionModels": "Function Models",
     "modelList": "Model List",
     "testConnection": "Test Connection",
@@ -21,6 +22,7 @@ const messages = {
     "getApiKey": "Get API Key",
     "addModel": "Add",
     "addImageModel": "Add Image Model",
+    "addVideoModel": "Add Video Model",
     "provider": {
       "section": "Provider Configuration",
       "label": "Provider",

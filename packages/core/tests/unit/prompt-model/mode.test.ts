@@ -39,6 +39,13 @@ describe('prompt-model mode mapping', () => {
       .toBe('image-multiimage')
   })
 
+  it('maps video sub modes to standard mode keys', () => {
+    expect(resolvePromptModeKey({ functionMode: 'video', videoSubMode: 'image2video' }))
+      .toBe('video-image2video')
+    expect(resolvePromptModeKey({ functionMode: 'video' }))
+      .toBe('video-image2video')
+  })
+
   it('maps standard mode keys back to current favorite compatibility modes', () => {
     expect(promptModeKeyToFavoriteMode('pro-variable')).toEqual({
       functionMode: 'context',
@@ -52,6 +59,10 @@ describe('prompt-model mode mapping', () => {
       functionMode: 'image',
       imageSubMode: 'multiimage',
     })
+    expect(promptModeKeyToFavoriteMode('video-image2video')).toEqual({
+      functionMode: 'video',
+      videoSubMode: 'image2video',
+    })
   })
 
   it('creates discriminated prompt contracts', () => {
@@ -64,6 +75,11 @@ describe('prompt-model mode mapping', () => {
       family: 'pro',
       subMode: 'conversation',
       modeKey: 'pro-conversation',
+    })
+    expect(createPromptContract('video-image2video')).toMatchObject({
+      family: 'video',
+      subMode: 'image2video',
+      modeKey: 'video-image2video',
     })
   })
 })

@@ -23,11 +23,13 @@ export interface FavoritePrompt {
 
   // 🆕 新增字段 - 功能模式分类体系
   /** 功能模式 (一级分类,必填) */
-  functionMode: 'basic' | 'context' | 'image';
+  functionMode: 'basic' | 'context' | 'image' | 'video';
   /** 优化模式 (二级分类,仅用于 basic/context 模式) */
   optimizationMode?: 'system' | 'user';
   /** 图像子模式 (二级分类,仅用于 image 模式) */
   imageSubMode?: 'text2image' | 'image2image' | 'multiimage';
+  /** 视频子模式 (二级分类,仅用于 video 模式) */
+  videoSubMode?: 'image2video';
 
   /** 元数据 (系统管理,用户不可编辑) */
   metadata?: {

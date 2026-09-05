@@ -157,6 +157,29 @@ export const IMAGE_ERROR_CODES = {
   GENERATION_FAILED: 'error.image.generation_failed',
 } as const;
 
+// Video generation errors | 视频生成错误
+export const VIDEO_ERROR_CODES = {
+  CONFIG_NOT_FOUND: 'error.video.config_not_found',
+  CONFIG_NOT_ENABLED: 'error.video.config_not_enabled',
+  CONFIG_ID_EMPTY: 'error.video.config_id_empty',
+  PROVIDER_NOT_FOUND: 'error.video.provider_not_found',
+  PROMPT_EMPTY: 'error.video.prompt_empty',
+  INPUT_IMAGE_REQUIRED: 'error.video.input_image_required',
+  INPUT_IMAGE_URL_NOT_SUPPORTED: 'error.video.input_image_url_not_supported',
+  INPUT_IMAGE_B64_REQUIRED: 'error.video.input_image_b64_required',
+  INPUT_IMAGE_INVALID_FORMAT: 'error.video.input_image_invalid_format',
+  INPUT_IMAGE_TOO_LARGE: 'error.video.input_image_too_large',
+  END_IMAGE_INVALID: 'error.video.end_image_invalid',
+  MODEL_NOT_SUPPORT_IMAGE2VIDEO: 'error.video.model_not_support_image2video',
+  MODEL_NOT_SUPPORT_END_FRAME: 'error.video.model_not_support_end_frame',
+  TASK_SUBMISSION_FAILED: 'error.video.task_submission_failed',
+  TASK_POLLING_FAILED: 'error.video.task_polling_failed',
+  TASK_TIMEOUT: 'error.video.task_timeout',
+  TASK_CANCELLED: 'error.video.task_cancelled',
+  TASK_FAILED: 'error.video.task_failed',
+  GENERATION_FAILED: 'error.video.generation_failed',
+} as const;
+
 // Import/export errors | 导入导出错误
 export const IMPORT_EXPORT_ERROR_CODES = {
   EXPORT_FAILED: 'error.import_export.export_failed',
@@ -193,6 +216,7 @@ export const ERROR_CODES = {
   VARIABLE_VALUE_GENERATION: VARIABLE_VALUE_GENERATION_ERROR_CODES,
   FAVORITE: FAVORITE_ERROR_CODES,
   IMAGE: IMAGE_ERROR_CODES,
+  VIDEO: VIDEO_ERROR_CODES,
   IMPORT_EXPORT: IMPORT_EXPORT_ERROR_CODES,
   DATA: DATA_ERROR_CODES,
   CORE: CORE_ERROR_CODES,
@@ -212,6 +236,7 @@ export type ErrorCode =
   | typeof VARIABLE_VALUE_GENERATION_ERROR_CODES[keyof typeof VARIABLE_VALUE_GENERATION_ERROR_CODES]
   | typeof FAVORITE_ERROR_CODES[keyof typeof FAVORITE_ERROR_CODES]
   | typeof IMAGE_ERROR_CODES[keyof typeof IMAGE_ERROR_CODES]
+  | typeof VIDEO_ERROR_CODES[keyof typeof VIDEO_ERROR_CODES]
   | typeof IMPORT_EXPORT_ERROR_CODES[keyof typeof IMPORT_EXPORT_ERROR_CODES]
   | typeof DATA_ERROR_CODES[keyof typeof DATA_ERROR_CODES]
   | typeof CORE_ERROR_CODES[keyof typeof CORE_ERROR_CODES];

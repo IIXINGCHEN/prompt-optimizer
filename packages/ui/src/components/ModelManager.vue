@@ -62,12 +62,38 @@
           </template>
           {{ t('modelManager.addImageModel') }}
         </NButton>
+        <NButton
+          v-else-if="activeTab === 'video'"
+          type="primary"
+          @click="openAddForActiveTab"
+          ghost
+        >
+          <template #icon>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="h-4 w-4"
+            >
+              <path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4" />
+              <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+              <path d="M3 15h6" />
+              <path d="M6 12v6" />
+            </svg>
+          </template>
+          {{ t('modelManager.addVideoModel') }}
+        </NButton>
       </template>
 
       <div class="model-manager-content">
         <NTabs v-model:value="activeTab" type="segment" size="small" animated class="model-manager-tabs">
           <NTabPane name="text" :tab="t('modelManager.textModels')" />
           <NTabPane name="image" :tab="t('modelManager.imageModels')" />
+          <NTabPane name="video" :tab="t('modelManager.videoModels')" />
           <NTabPane name="function" :tab="t('modelManager.functionModels')" />
         </NTabs>
 
@@ -91,6 +117,10 @@
                 @edit="handleEditImageModel"
                 @clone="handleCloneImageModel"
                 @add="handleAddImageModel"
+              />
+              <VideoModelManager
+                v-show="activeTab === 'video'"
+                ref="videoManagerRef"
               />
               <FunctionModelManager
                 v-show="activeTab === 'function'"
@@ -120,6 +150,7 @@ import { NButton, NCard, NModal, NTabs, NTabPane } from 'naive-ui'
 import type { ImageModelConfig } from '@prompt-optimizer/core'
 import ImageModelEditModal from './ImageModelEditModal.vue'
 import ImageModelManager from './ImageModelManager.vue'
+import VideoModelManager from './VideoModelManager.vue'
 import TextModelManager from './TextModelManager.vue'
 import FunctionModelManager from './FunctionModelManager.vue'
 import ToastUI from './Toast.vue'
@@ -136,9 +167,10 @@ const emit = defineEmits(['modelsUpdated', 'close', 'select', 'update:show'])
 
 const { t } = useI18n()
 
-const activeTab = ref<'text' | 'image' | 'function'>('text')
+const activeTab = ref<'text' | 'image' | 'video' | 'function'>('text')
 const textManagerRef = ref<InstanceType<typeof TextModelManager> | null>(null)
 const imageListRef = ref<InstanceType<typeof ImageModelManager> | null>(null)
+const videoManagerRef = ref<InstanceType<typeof VideoModelManager> | null>(null)
 const functionManagerRef = ref<InstanceType<typeof FunctionModelManager> | null>(null)
 const showImageModelEdit = ref(false)
 const editingImageModelId = ref<string | undefined>(undefined)
@@ -152,6 +184,9 @@ if (!services?.value) {
 provide('imageModelManager', services.value.imageModelManager)
 provide('imageRegistry', services.value.imageAdapterRegistry)
 provide('imageService', services.value.imageService)
+provide('videoModelManager', services.value.videoModelManager)
+provide('videoRegistry', services.value.videoAdapterRegistry)
+provide('videoService', services.value.videoService)
 
 const close = () => {
   emit('update:show', false)
@@ -163,6 +198,8 @@ const openAddForActiveTab = () => {
     textManagerRef.value?.openAddModal()
   } else if (activeTab.value === 'image') {
     handleAddImageModel()
+  } else if (activeTab.value === 'video') {
+    videoManagerRef.value?.openAddModal()
   }
 }
 
@@ -213,7 +250,7 @@ if (typeof window !== 'undefined') {
   const tabHandler = (e: Event) => {
     try {
       const tab = (e as CustomEvent).detail
-      if (tab === 'text' || tab === 'image' || tab === 'function') activeTab.value = tab
+      if (tab === 'text' || tab === 'image' || tab === 'video' || tab === 'function') activeTab.value = tab
     } catch {
       // 静默处理错误
     }

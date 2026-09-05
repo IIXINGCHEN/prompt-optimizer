@@ -35,11 +35,19 @@ import {
   createImageAdapterRegistry,
   createTextAdapterRegistry,
   createImageStorageService,
+  createVideoModelManager,
+  createVideoService,
+  createVideoAdapterRegistry,
+  createVideoStorageService,
   runStorageStartupSafetyCheck,
   writeStartupRepairReport,
   // migrateLegacySessions - 已移除，session 是本次重构新引入
   type IImageModelManager,
   type IImageService,
+  type IVideoModelManager,
+  type IVideoService,
+  type IVideoAdapterRegistry,
+  type IVideoStorageService,
   type ITextAdapterRegistry,
   type IModelManager,
   type ITemplateManager,
@@ -125,6 +133,10 @@ export function useAppInitializer(): {
       let imageAdapterRegistryInstance: ReturnType<typeof createImageAdapterRegistry> | undefined;
       let imageStorageService: IImageStorageService | undefined;
       let favoriteImageStorageService: IImageStorageService | undefined;
+      let videoModelManager: IVideoModelManager | undefined;
+      let videoService: IVideoService | undefined;
+      let videoAdapterRegistryInstance: IVideoAdapterRegistry | undefined;
+      let videoStorageService: IVideoStorageService | undefined;
       let textAdapterRegistryInstance: ITextAdapterRegistry | undefined;
 
       if (isRunningInElectron()) {
@@ -234,6 +246,10 @@ export function useAppInitializer(): {
           console.warn('[AppInitializer] Failed to read context mode; using default value:', err);
         }
 
+        // 视频相关（Electron）
+        videoAdapterRegistryInstance = createVideoAdapterRegistry();
+        videoStorageService = createVideoStorageService();
+
         services.value = {
           modelManager,
           templateManager,
@@ -253,6 +269,10 @@ export function useAppInitializer(): {
           imageAdapterRegistry: imageAdapterRegistryInstance,
           imageStorageService, // 🆕 图像存储服务
           favoriteImageStorageService,
+          videoModelManager,
+          videoService,
+          videoAdapterRegistry: videoAdapterRegistryInstance,
+          videoStorageService,
           evaluationService, // 🆕 评估服务
           variableExtractionService, // 🆕 变量提取服务
           variableValueGenerationService, // 🆕 变量值生成服务
@@ -308,6 +328,16 @@ export function useAppInitializer(): {
           quotaStrategy: 'reject',
           dbName: 'PromptOptimizerFavoriteImageDB',
         });
+
+        // 🆕 视频服务初始化
+        const videoAdapterRegistry = createVideoAdapterRegistry();
+        videoAdapterRegistryInstance = videoAdapterRegistry;
+        const videoModelManagerInstance = createVideoModelManager(storageProvider, videoAdapterRegistry);
+        videoModelManager = videoModelManagerInstance;
+        videoService = createVideoService(videoModelManagerInstance, videoAdapterRegistry);
+
+        console.log('[AppInitializer] Initializing video storage service...');
+        videoStorageService = createVideoStorageService();
 
         // 📝 图像数据迁移已移除（session 是本次重构新引入，无历史数据需要迁移）
         // 如果将来需要迁移，可以使用 migrateLegacySessions() 函数
@@ -501,6 +531,10 @@ export function useAppInitializer(): {
           imageAdapterRegistry: imageAdapterRegistryInstance,
           imageStorageService, // 🆕 图像存储服务
           favoriteImageStorageService,
+          videoModelManager: videoModelManagerInstance,
+          videoService,
+          videoAdapterRegistry: videoAdapterRegistryInstance,
+          videoStorageService,
           evaluationService, // 🆕 评估服务
           variableExtractionService, // 🆕 变量提取服务
           variableValueGenerationService, // 🆕 变量值生成服务

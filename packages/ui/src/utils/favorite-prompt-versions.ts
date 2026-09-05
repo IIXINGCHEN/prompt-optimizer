@@ -53,7 +53,7 @@ export const getEmbeddedFavoritePromptAsset = (
 }
 
 export const promptContentToEditableText = (content: PromptContent): string => {
-  if (content.kind === 'text' || content.kind === 'image-prompt') {
+  if (content.kind === 'text' || content.kind === 'image-prompt' || content.kind === 'video-prompt') {
     return content.text
   }
 

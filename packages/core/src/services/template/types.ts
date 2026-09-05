@@ -17,6 +17,8 @@ export interface TemplateMetadata {
     | 'text2imageOptimize'
     | 'image2imageOptimize'
     | 'multiimageOptimize'
+    | 'image2videoOptimize'
+    | 'videoIterate'
     | 'imageIterate'
     | 'iterate'
     | 'conversationMessageOptimize'

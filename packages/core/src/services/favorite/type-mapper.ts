@@ -6,11 +6,13 @@ import type { PromptRecordType } from '../history/types';
  */
 export interface FunctionModeMapping {
   /** 功能模式 (一级分类) */
-  functionMode: 'basic' | 'context' | 'image';
+  functionMode: 'basic' | 'context' | 'image' | 'video';
   /** 优化模式 (二级分类,仅用于 basic/context 模式) */
   optimizationMode?: 'system' | 'user';
   /** 图像子模式 (二级分类,仅用于 image 模式) */
   imageSubMode?: 'text2image' | 'image2image' | 'multiimage';
+  /** 视频子模式 (二级分类,仅用于 video 模式) */
+  videoSubMode?: 'image2video';
 }
 
 /**
@@ -29,6 +31,14 @@ export class TypeMapper {
       return {
         functionMode: 'image',
         imageSubMode: 'text2image' // 默认文生图模式
+      };
+    }
+
+    // 视频模式映射
+    if (recordType === 'image2videoOptimize' || recordType === 'videoIterate') {
+      return {
+        functionMode: 'video',
+        videoSubMode: 'image2video',
       };
     }
 
@@ -111,7 +121,7 @@ export class TypeMapper {
     }
 
     // 检查功能模式值合法性
-    if (!['basic', 'context', 'image'].includes(mapping.functionMode)) {
+    if (!['basic', 'context', 'image', 'video'].includes(mapping.functionMode)) {
       return false;
     }
 
@@ -123,8 +133,8 @@ export class TypeMapper {
       if (!['system', 'user'].includes(mapping.optimizationMode)) {
         return false;
       }
-      // 这两种模式不应有 imageSubMode
-      if (mapping.imageSubMode) {
+      // 这两种模式不应有 imageSubMode 或 videoSubMode
+      if (mapping.imageSubMode || mapping.videoSubMode) {
         return false;
       }
     }
@@ -137,8 +147,22 @@ export class TypeMapper {
       if (!['text2image', 'image2image', 'multiimage'].includes(mapping.imageSubMode)) {
         return false;
       }
-      // 图像模式不应有 optimizationMode
-      if (mapping.optimizationMode) {
+      // 图像模式不应有 optimizationMode 或 videoSubMode
+      if (mapping.optimizationMode || mapping.videoSubMode) {
+        return false;
+      }
+    }
+
+    // 视频模式必须有视频子模式
+    if (mapping.functionMode === 'video') {
+      if (!mapping.videoSubMode) {
+        return false;
+      }
+      if (!['image2video'].includes(mapping.videoSubMode)) {
+        return false;
+      }
+      // 视频模式不应有 optimizationMode 或 imageSubMode
+      if (mapping.optimizationMode || mapping.imageSubMode) {
         return false;
       }
     }

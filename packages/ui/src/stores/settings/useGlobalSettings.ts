@@ -17,10 +17,11 @@ import { ref, watch, type Ref } from 'vue'
 import { UI_SETTINGS_KEYS } from '@prompt-optimizer/core'
 import { getPiniaServices } from '../../plugins/pinia'
 
-export type FunctionMode = 'basic' | 'pro' | 'image'
+export type FunctionMode = 'basic' | 'pro' | 'image' | 'video'
 export type BasicSubMode = 'system' | 'user'
 export type ProSubMode = 'multi' | 'variable'
 export type ImageSubMode = 'text2image' | 'image2image' | 'multiimage'
+export type VideoSubMode = 'image2video'
 
 export interface GlobalSettingsState {
   selectedThemeId: string
@@ -31,6 +32,7 @@ export interface GlobalSettingsState {
   basicSubMode: BasicSubMode
   proSubMode: ProSubMode
   imageSubMode: ImageSubMode
+  videoSubMode?: VideoSubMode
 
   lastActiveAt: number
 }
@@ -45,11 +47,12 @@ const createDefaultState = (): GlobalSettingsState => ({
   basicSubMode: 'system',
   proSubMode: 'variable',
   imageSubMode: 'text2image',
+  videoSubMode: 'image2video',
   lastActiveAt: Date.now(),
 })
 
 const isFunctionMode = (value: unknown): value is FunctionMode =>
-  value === 'basic' || value === 'pro' || value === 'image'
+  value === 'basic' || value === 'pro' || value === 'image' || value === 'video'
 
 const isBasicSubMode = (value: unknown): value is BasicSubMode =>
   value === 'system' || value === 'user'
@@ -133,6 +136,12 @@ export const useGlobalSettings = defineStore('globalSettings', () => {
   const updateImageSubMode = (mode: ImageSubMode) => {
     if (state.value.imageSubMode === mode) return
     state.value.imageSubMode = mode
+    touch()
+  }
+
+  const updateVideoSubMode = (mode: VideoSubMode) => {
+    if (state.value.videoSubMode === mode) return
+    state.value.videoSubMode = mode
     touch()
   }
 
@@ -378,6 +387,7 @@ export const useGlobalSettings = defineStore('globalSettings', () => {
     updateBasicSubMode,
     updateProSubMode,
     updateImageSubMode,
+    updateVideoSubMode,
 
     // 工具方法
     reset,
