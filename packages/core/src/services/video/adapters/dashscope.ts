@@ -104,7 +104,7 @@ export class DashScopeVideoAdapter extends AbstractVideoProviderAdapter {
   protected getDefaultParameterValues(_modelId: string): Record<string, unknown> {
     return {
       size: '1280*720',
-      prompt_extend: true,
+      prompt_extend: false,
     }
   }
 
@@ -121,6 +121,7 @@ export class DashScopeVideoAdapter extends AbstractVideoProviderAdapter {
     const imgUrl = this.resolveInputImage(request.inputImage)
 
     const parameters: Record<string, any> = {
+      prompt_extend: false,
       ...config.paramOverrides,
       ...request.paramOverrides,
     }
@@ -165,6 +166,24 @@ export class DashScopeVideoAdapter extends AbstractVideoProviderAdapter {
 
     if (!res.ok) {
       const errText = await res.text()
+      try {
+        const errJson = JSON.parse(errText)
+        if (errJson.code === 'DataInspectionFailed') {
+          throw new VideoError(
+            VIDEO_ERROR_CODES.TASK_SUBMISSION_FAILED,
+            '内容安全审核未通过（DataInspectionFailed）：您上传的首帧图片或提示词被阿里云绿网安全系统拦截（疑似包含敏感人物、敏感词汇、清凉服饰或违规内容）。请尝试更换参考图片或精简提示词后再试。'
+          )
+        }
+        if (errJson.message) {
+          throw new VideoError(
+            VIDEO_ERROR_CODES.TASK_SUBMISSION_FAILED,
+            `DashScope 任务提交失败 (${errJson.code || res.status}): ${errJson.message}`
+          )
+        }
+      } catch (e) {
+        if (e instanceof VideoError) throw e
+      }
+
       throw new VideoError(
         VIDEO_ERROR_CODES.TASK_SUBMISSION_FAILED,
         `Failed to submit DashScope video task (${res.status}): ${errText}`
@@ -265,9 +284,13 @@ export class DashScopeVideoAdapter extends AbstractVideoProviderAdapter {
         },
       }
     } else if (status === 'failed') {
+      let message = output.message || 'DashScope video generation failed'
+      if (output.code === 'DataInspectionFailed' || String(message).includes('DataInspectionFailed')) {
+        message = '内容安全审核未通过（DataInspectionFailed）：视频生成过程中被阿里云绿网系统拦截。请尝试更换图片或调整动作描述。'
+      }
       task.error = {
         code: output.code || 'TASK_FAILED',
-        message: output.message || 'DashScope video generation failed',
+        message,
         raw: data,
       }
     }
@@ -280,17 +303,13 @@ export class DashScopeVideoAdapter extends AbstractVideoProviderAdapter {
     if (!rawBase) {
       return this.getProvider().defaultBaseURL!
     }
-    // Defensive check: If user configured an OpenAI-compatible text endpoint
-    // like .../compatible-mode/v1 or private LLM gateway, fallback to official DashScope AIGC endpoint
-    if (
-      rawBase.includes('compatible-mode') ||
-      rawBase.includes('/v1/chat') ||
-      (rawBase.includes('.maas.aliyuncs.com') && !rawBase.includes('dashscope.aliyuncs.com'))
-    ) {
-      console.warn(
-        `[DashScope] Incompatible text baseURL detected (${rawBase}). Video generation requires native DashScope endpoint. Falling back to default: ${this.getProvider().defaultBaseURL}`
-      )
-      return this.getProvider().defaultBaseURL!
+    // If user provided a regional workspace endpoint ending with /compatible-mode/v1,
+    // convert it to the official AIGC /api/v1 endpoint (e.g. https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1)
+    if (rawBase.includes('/compatible-mode/v1')) {
+      return this.normalizeBaseUrl(rawBase.replace('/compatible-mode/v1', '/api/v1'))
+    }
+    if (rawBase.includes('compatible-mode')) {
+      return this.normalizeBaseUrl(rawBase.replace(/compatible-mode.*$/, 'api/v1'))
     }
     return this.normalizeBaseUrl(rawBase)
   }

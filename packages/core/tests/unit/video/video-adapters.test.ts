@@ -88,7 +88,7 @@ describe('DashScopeVideoAdapter', () => {
 
     expect(res.taskId).toBe('ds-task-999')
     expect(mockFetch).toHaveBeenCalledWith(
-      'https://dashscope.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis',
+      'https://llm-lppkyf39n2jpxvg5.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis',
       expect.anything()
     )
   })
