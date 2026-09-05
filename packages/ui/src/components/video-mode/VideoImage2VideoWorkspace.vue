@@ -103,9 +103,20 @@
 
                 <NGridItem :span="10" :xs="24" :sm="10">
                   <NSpace vertical :size="4">
-                    <NText depth="3" style="font-size: 12px;">
-                      {{ t('imageWorkspace.input.template') }}
-                    </NText>
+                    <NFlex justify="space-between" align="center">
+                      <NText depth="3" style="font-size: 12px;">
+                        {{ t('imageWorkspace.input.template') }}
+                      </NText>
+                      <NButton
+                        v-if="appOpenTemplateManager"
+                        quaternary
+                        size="tiny"
+                        :title="t('template.configure')"
+                        @click="appOpenTemplateManager('image2videoOptimize')"
+                      >
+                        ⚙️
+                      </NButton>
+                    </NFlex>
                     <NSelect
                       v-model:value="session.selectedTemplateId"
                       :options="videoTemplateOptions"
@@ -148,9 +159,10 @@
               v-model:selected-iterate-template="selectedIterateTemplate"
               :versions="currentVersions"
               :current-version-id="currentVersionId"
-              :show-preview="true"
+              show-preview
               iterate-template-type="videoIterate"
               @iterate="handleIteratePrompt"
+              @openTemplateManager="appOpenTemplateManager?.($event)"
               @switchVersion="handleSwitchVersion"
               @open-preview="handleOpenPromptPreview"
             />
@@ -337,6 +349,7 @@ const toast = useToast()
 const session = useVideoImage2VideoSession()
 const services = inject<Ref<AppServices | null>>('services')
 const appOpenModelManager = inject<((tab?: string) => void) | null>('openModelManager', null)
+const appOpenTemplateManager = inject<((type?: string) => void) | null>('openTemplateManager', null)
 
 const splitRootRef = ref<HTMLDivElement | null>(null)
 const firstFrameInputRef = ref<HTMLInputElement | null>(null)

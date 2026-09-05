@@ -78,6 +78,10 @@ import { template as image2video_cinematic_optimize } from './video-optimize/ima
 import { template as image2video_cinematic_optimize_en } from './video-optimize/image2video/cinematic-optimize_en';
 import { template as image2video_character_motion_optimize } from './video-optimize/image2video/character-motion-optimize';
 import { template as image2video_character_motion_optimize_en } from './video-optimize/image2video/character-motion-optimize_en';
+import { template as image2video_commercial_product_optimize } from './video-optimize/image2video/commercial-product-optimize';
+import { template as image2video_commercial_product_optimize_en } from './video-optimize/image2video/commercial-product-optimize_en';
+import { template as image2video_landscape_nature_optimize } from './video-optimize/image2video/landscape-nature-optimize';
+import { template as image2video_landscape_nature_optimize_en } from './video-optimize/image2video/landscape-nature-optimize_en';
 import { template as video_iterate_general } from './video-optimize/iterate/video-iterate-general';
 import { template as video_iterate_general_en } from './video-optimize/iterate/video-iterate-general_en';
 
@@ -228,6 +232,10 @@ export const ALL_TEMPLATES = {
   image2video_cinematic_optimize_en,
   image2video_character_motion_optimize,
   image2video_character_motion_optimize_en,
+  image2video_commercial_product_optimize,
+  image2video_commercial_product_optimize_en,
+  image2video_landscape_nature_optimize,
+  image2video_landscape_nature_optimize_en,
   video_iterate_general,
   video_iterate_general_en,
   // 评估模板 - 基础模式/系统提示词

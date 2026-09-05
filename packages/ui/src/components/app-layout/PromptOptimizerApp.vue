@@ -331,6 +331,7 @@ import { useSessionRestoreCoordinator } from '../../composables/session/useSessi
 import { useImageText2ImageSession } from '../../stores/session/useImageText2ImageSession'
 import { useImageImage2ImageSession } from '../../stores/session/useImageImage2ImageSession'
 import { useImageMultiImageSession } from '../../stores/session/useImageMultiImageSession'
+import { useVideoImage2VideoSession } from '../../stores/session/useVideoImage2VideoSession'
 import { useGlobalSettings } from '../../stores/settings/useGlobalSettings'
 
 import type { TemplateManagerTemplateType } from '../../composables/prompt/useTemplateManager'
@@ -868,6 +869,7 @@ const proVariableSession = useProVariableSession();
 const imageText2ImageSession = useImageText2ImageSession();
 const imageImage2ImageSession = useImageImage2ImageSession();
 const imageMultiImageSession = useImageMultiImageSession();
+const videoImage2VideoSession = useVideoImage2VideoSession();
 
 // 🔧 Step E: 使用 route-computed 代替旧 state
 const activeBasicSession = computed(() =>
@@ -1122,6 +1124,8 @@ const getCurrentSession = () => {
             : routeImageSubMode.value === 'multiimage'
                 ? imageMultiImageSession
                 : imageImage2ImageSession;
+    } else if (routeFunctionMode.value === 'video') {
+        return videoImage2VideoSession;
     }
     return basicSystemSession;
 };
@@ -1393,6 +1397,10 @@ watch(
         // 🔧 Pro-system 模式的优化结果由 useConversationOptimization 直写 session store，
         // 避免用不相关的 optimizer 状态覆盖（刷新后易写入空值）。
         if (routeFunctionMode.value === 'pro' && routeProSubMode.value === 'multi') {
+            return;
+        }
+
+        if (routeFunctionMode.value === 'video') {
             return;
         }
 
@@ -1847,6 +1855,9 @@ const handleTemplateSelected = (
                     : routeImageSubMode.value === "multiimage"
                         ? imageMultiImageSession
                     : imageText2ImageSession;
+            case "video-image2video-optimize":
+            case "video-iterate":
+                return videoImage2VideoSession;
             default:
                 return null;
         }
@@ -1864,7 +1875,8 @@ const handleTemplateSelected = (
     const isIterate =
         templateType === "iterate" ||
         templateType === "contextIterate" ||
-        templateType === "imageIterate";
+        templateType === "imageIterate" ||
+        templateType === "videoIterate";
 
     const templateId = template?.id || null;
 
@@ -2043,6 +2055,8 @@ const normalizeTemplateTypeForManager = (
         "image2imageOptimize",
         "multiimageOptimize",
         "imageIterate",
+        "image2videoOptimize",
+        "videoIterate",
         "conversationMessageOptimize",
         "contextUserOptimize",
         "contextIterate",

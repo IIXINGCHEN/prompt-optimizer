@@ -83,6 +83,19 @@
           {{ `🌀 ${t('templateManager.imageIterateTemplates')}` }}
         </NButton>
       </NGridItem>
+
+      <!-- 视频 · 图生视频 -->
+      <NGridItem>
+        <NButton block :type="currentCategory==='video-image2video-optimize' ? 'primary' : 'default'" @click="currentCategory='video-image2video-optimize'">
+          {{ `🎬 ${t('templateManager.videoImage2VideoTemplates')}` }}
+        </NButton>
+      </NGridItem>
+      <!-- 视频 · 迭代 -->
+      <NGridItem>
+        <NButton block :type="currentCategory==='video-iterate' ? 'primary' : 'default'" @click="currentCategory='video-iterate'">
+          {{ `🔄 ${t('templateManager.videoIterateTemplates')}` }}
+        </NButton>
+      </NGridItem>
     </NGrid>
 
     <!-- 模板列表 -->
@@ -656,6 +669,7 @@ import { useProVariableSession } from '../stores/session/useProVariableSession'
 import { useImageText2ImageSession } from '../stores/session/useImageText2ImageSession'
 import { useImageImage2ImageSession } from '../stores/session/useImageImage2ImageSession'
 import { useImageMultiImageSession } from '../stores/session/useImageMultiImageSession'
+import { useVideoImage2VideoSession } from '../stores/session/useVideoImage2VideoSession'
 
 const { t } = useI18n()
 const confirmDialog = useConfirmDialog()
@@ -706,6 +720,7 @@ const proVariableSession = useProVariableSession()
 const imageText2ImageSession = useImageText2ImageSession()
 const imageImage2ImageSession = useImageImage2ImageSession()
 const imageMultiImageSession = useImageMultiImageSession()
+const videoImage2VideoSession = useVideoImage2VideoSession()
 
 const templates = ref<Template[]>([])
 const currentCategory = ref(getCategoryFromProps())
@@ -772,6 +787,10 @@ function getCategoryFromProps() {
       return 'image-multiimage-optimize'
     case 'imageIterate':
       return 'image-iterate'
+    case 'image2videoOptimize':
+      return 'video-image2video-optimize'
+    case 'videoIterate':
+      return 'video-iterate'
     case 'conversationMessageOptimize':
       return 'context-system-optimize'
     case 'contextUserOptimize':
@@ -784,7 +803,7 @@ function getCategoryFromProps() {
 }
 
 // 获取当前模板类型 - 根据当前分类而不是props
-function getCurrentTemplateType(): 'optimize' | 'userOptimize' | 'iterate' | 'text2imageOptimize' | 'image2imageOptimize' | 'multiimageOptimize' | 'imageIterate' | 'conversationMessageOptimize' | 'contextUserOptimize' | 'contextIterate' {
+function getCurrentTemplateType(): 'optimize' | 'userOptimize' | 'iterate' | 'text2imageOptimize' | 'image2imageOptimize' | 'multiimageOptimize' | 'imageIterate' | 'image2videoOptimize' | 'videoIterate' | 'conversationMessageOptimize' | 'contextUserOptimize' | 'contextIterate' {
   switch (currentCategory.value) {
     case 'system-optimize':
       return 'optimize'
@@ -801,6 +820,10 @@ function getCurrentTemplateType(): 'optimize' | 'userOptimize' | 'iterate' | 'te
       return 'multiimageOptimize'
     case 'image-iterate':
       return 'imageIterate'
+    case 'video-image2video-optimize':
+      return 'image2videoOptimize'
+    case 'video-iterate':
+      return 'videoIterate'
     case 'context-system-optimize':
       return 'conversationMessageOptimize'
     case 'context-user-optimize':
@@ -843,6 +866,10 @@ function getSelectedTemplateIdForCategory(category: string): string | undefined 
         : props.imageSubMode === 'multiimage'
           ? (imageMultiImageSession.selectedIterateTemplateId || undefined)
         : (imageText2ImageSession.selectedIterateTemplateId || undefined)
+    case 'video-image2video-optimize':
+      return videoImage2VideoSession.selectedTemplateId || undefined
+    case 'video-iterate':
+      return videoImage2VideoSession.selectedIterateTemplateId || undefined
     default:
       return undefined
   }
@@ -871,6 +898,10 @@ function getCurrentCategoryLabel() {
       return t('imageMode.multiimage')
     case 'image-iterate':
       return t('templateManager.imageIterateTemplates')
+    case 'video-image2video-optimize':
+      return t('templateManager.videoImage2VideoTemplates')
+    case 'video-iterate':
+      return t('templateManager.videoIterateTemplates')
     case 'context-system-optimize':
       return t('templateManager.optimizeTemplateList') + ' (Pro)'
     case 'context-user-optimize':
@@ -1299,6 +1330,13 @@ const filteredTemplates = computed(() => {
       case 'context-iterate':
         // 上下文-迭代优化模板
         return templateType === 'contextIterate'
+
+      // 视频类模板
+      case 'video-image2video-optimize':
+        return templateType === 'image2videoOptimize'
+
+      case 'video-iterate':
+        return templateType === 'videoIterate'
 
       default:
         return false

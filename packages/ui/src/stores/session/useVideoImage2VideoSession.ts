@@ -319,6 +319,29 @@ export const useVideoImage2VideoSession = defineStore('session-video-image2video
     } catch {}
   }
 
+  const updateTemplate = (id: string | null) => {
+    selectedTemplateId.value = id || ''
+    void saveSession()
+  }
+
+  const updateIterateTemplate = (id: string | null) => {
+    selectedIterateTemplateId.value = id || ''
+    void saveSession()
+  }
+
+  const updateOptimizedResult = (result: {
+    optimizedPrompt: string
+    reasoning?: string
+    chainId?: string
+    versionId?: string
+  }) => {
+    optimizedPrompt.value = result.optimizedPrompt
+    if (result.reasoning !== undefined) reasoning.value = result.reasoning
+    if (result.chainId !== undefined) chainId.value = result.chainId
+    if (result.versionId !== undefined) versionId.value = result.versionId
+    void saveSession()
+  }
+
   return {
     originalPrompt,
     optimizedPrompt,
@@ -334,6 +357,9 @@ export const useVideoImage2VideoSession = defineStore('session-video-image2video
     selectedTextModelKey,
     selectedTemplateId,
     selectedIterateTemplateId,
+    updateTemplate,
+    updateIterateTemplate,
+    updateOptimizedResult,
     mainSplitLeftPct,
     testColumnCount,
     layout,

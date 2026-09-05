@@ -15,6 +15,8 @@ const messages = {
     "imageText2ImageTemplates": "圖像 · 文生圖範本",
     "imageImage2ImageTemplates": "圖像 · 圖生圖範本",
     "imageIterateTemplates": "圖像 · 迭代範本",
+    "videoImage2VideoTemplates": "影片 · 圖生影片範本",
+    "videoIterateTemplates": "影片 · 迭代範本",
     "addTemplate": "新增",
     "editTemplate": "編輯",
     "deleteTemplate": "刪除",
