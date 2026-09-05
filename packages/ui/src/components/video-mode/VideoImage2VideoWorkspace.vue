@@ -95,6 +95,8 @@
                       :options="textModelOptions"
                       size="small"
                       :disabled="isOptimizing"
+                      filterable
+                      tag
                     />
                   </NSpace>
                 </NGridItem>
@@ -109,6 +111,9 @@
                       :options="videoTemplateOptions"
                       size="small"
                       :disabled="isOptimizing"
+                      filterable
+                      tag
+                      :placeholder="t('imageWorkspace.input.templatePlaceholder')"
                     />
                   </NSpace>
                 </NGridItem>

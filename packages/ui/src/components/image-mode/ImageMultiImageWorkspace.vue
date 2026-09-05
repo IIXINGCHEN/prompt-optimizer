@@ -265,6 +265,7 @@
                       size="medium"
                       :disabled="optimizing || isIterating"
                       filterable
+                      tag
                       :show-config-action="!!appOpenTemplateManager"
                       :show-empty-config-c-t-a="true"
                       @focus="handleTemplateSelectFocus"

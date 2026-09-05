@@ -412,6 +412,7 @@
                                         size="medium"
                                         :disabled="isOptimizing"
                                         filterable
+                                        tag
                                         :show-config-action="true"
                                         :show-empty-config-c-t-a="true"
                                         @focus="handleTemplateSelectFocus"
