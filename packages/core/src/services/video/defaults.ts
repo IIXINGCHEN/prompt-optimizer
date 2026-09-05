@@ -17,7 +17,7 @@ const VIDEO_BUILTIN_CONFIGS: readonly BuiltinVideoConfigSpec[] = [
   {
     providerId: 'dashscope',
     configId: 'video-dashscope-wan',
-    modelId: 'wan2.1-i2v-plus',
+    modelId: 'wanx2.1-i2v-plus',
     displayName: 'Wan 2.1 I2V Plus (DashScope)',
   },
   {

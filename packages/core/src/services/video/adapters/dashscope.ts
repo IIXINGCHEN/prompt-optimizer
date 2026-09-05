@@ -35,7 +35,7 @@ export class DashScopeVideoAdapter extends AbstractVideoProviderAdapter {
   public getModels(): VideoModel[] {
     return [
       {
-        id: 'wan2.1-i2v-plus',
+        id: 'wanx2.1-i2v-plus',
         name: 'Wan 2.1 I2V Plus',
         description: 'Aliyun Wan 2.1 high quality image-to-video foundation model',
         providerId: 'dashscope',
@@ -49,11 +49,11 @@ export class DashScopeVideoAdapter extends AbstractVideoProviderAdapter {
           supportedRatios: ['16:9', '9:16', '1:1'],
           supportedResolutions: ['720p', '480p'],
         },
-        parameterDefinitions: this.getParameterDefinitions('wan2.1-i2v-plus'),
-        defaultParameterValues: this.getDefaultParameterValues('wan2.1-i2v-plus'),
+        parameterDefinitions: this.getParameterDefinitions('wanx2.1-i2v-plus'),
+        defaultParameterValues: this.getDefaultParameterValues('wanx2.1-i2v-plus'),
       },
       {
-        id: 'wan2.1-i2v-turbo',
+        id: 'wanx2.1-i2v-turbo',
         name: 'Wan 2.1 I2V Turbo',
         description: 'Aliyun Wan 2.1 fast image-to-video model',
         providerId: 'dashscope',
@@ -67,8 +67,8 @@ export class DashScopeVideoAdapter extends AbstractVideoProviderAdapter {
           supportedRatios: ['16:9', '9:16', '1:1'],
           supportedResolutions: ['720p', '480p'],
         },
-        parameterDefinitions: this.getParameterDefinitions('wan2.1-i2v-turbo'),
-        defaultParameterValues: this.getDefaultParameterValues('wan2.1-i2v-turbo'),
+        parameterDefinitions: this.getParameterDefinitions('wanx2.1-i2v-turbo'),
+        defaultParameterValues: this.getDefaultParameterValues('wanx2.1-i2v-turbo'),
       },
     ]
   }
@@ -135,8 +135,17 @@ export class DashScopeVideoAdapter extends AbstractVideoProviderAdapter {
       parameters.seed = request.seed
     }
 
+    let modelId = (config.modelId || '').trim() || 'wanx2.1-i2v-plus'
+    if (modelId === 'wan2.1-i2v-plus') {
+      modelId = 'wanx2.1-i2v-plus'
+    } else if (modelId === 'wan2.1-i2v-turbo') {
+      modelId = 'wanx2.1-i2v-turbo'
+    } else if (modelId.startsWith('wan2.1-')) {
+      modelId = modelId.replace('wan2.1-', 'wanx2.1-')
+    }
+
     const payload: Record<string, any> = {
-      model: config.modelId,
+      model: modelId,
       input: {
         prompt: request.prompt,
         img_url: imgUrl,

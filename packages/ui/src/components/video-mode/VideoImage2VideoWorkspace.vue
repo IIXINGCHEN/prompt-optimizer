@@ -528,6 +528,24 @@ const handleOpenPromptPreview = () => {
   showPromptPreview.value = true
 }
 
+const extractProductionPrompt = (text: string): string => {
+  if (!text) return ''
+  const sectionMatch = text.match(
+    /(?:【完整\s*(?:Prompt|提示词)】|完整\s*(?:Prompt|提示词)[：:]|【成品\s*(?:Prompt|提示词|生成提示词)】|成品\s*(?:Prompt|提示词|生成提示词)[：:])\s*([\s\S]+?)(?=(?:\n\s*【|\n\s*#|\n\s*负面提示词|\n\s*Negative|$))/i
+  )
+  if (sectionMatch && sectionMatch[1]?.trim()) {
+    return sectionMatch[1].trim().replace(/^```[a-zA-Z]*\n?/, '').replace(/```$/, '').trim()
+  }
+
+  const endMatch = text.match(
+    /(?:【完整\s*(?:Prompt|提示词)】|完整\s*(?:Prompt|提示词)[：:]|【成品\s*(?:Prompt|提示词|生成提示词)】|成品\s*(?:Prompt|提示词|生成提示词)[：:])\s*([\s\S]+)$/i
+  )
+  if (endMatch && endMatch[1]?.trim()) {
+    return endMatch[1].trim().replace(/^```[a-zA-Z]*\n?/, '').replace(/```$/, '').trim()
+  }
+  return text.trim()
+}
+
 const runVariant = async (id: VideoTestVariantId) => {
   const configId = session.variants[id]?.modelKey
   if (!configId) {
@@ -551,11 +569,12 @@ const runVariant = async (id: VideoTestVariantId) => {
     return
   }
 
-  const promptText = session.optimizedPrompt || session.originalPrompt
-  if (!promptText.trim()) {
+  const rawPrompt = session.optimizedPrompt || session.originalPrompt
+  if (!rawPrompt.trim()) {
     toast.error(t('videoWorkspace.input.promptRequired'))
     return
   }
+  const promptText = extractProductionPrompt(rawPrompt)
 
   variantRunning.value[id] = true
   const controller = new AbortController()
