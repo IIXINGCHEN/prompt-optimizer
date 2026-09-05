@@ -129,7 +129,16 @@ export function useVideoModelManager() {
     if (!videoModelManager) return false
     isSaving.value = true
     try {
-      const existing = configs.value.find((c) => c.id === config.id)
+      let existing: VideoModelConfig | null = null
+      if (typeof videoModelManager.getConfig === 'function') {
+        try {
+          existing = await videoModelManager.getConfig(config.id)
+        } catch {}
+      }
+      if (!existing) {
+        existing = configs.value.find((c) => c.id === config.id) || null
+      }
+
       if (existing) {
         await videoModelManager.updateConfig(config.id, config)
         toast.success(t('video.config.updateSuccess'))

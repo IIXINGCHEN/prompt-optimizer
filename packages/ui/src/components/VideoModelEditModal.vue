@@ -136,6 +136,7 @@ const {
   models,
   loadProviders,
   loadModelsForProvider,
+  loadConfigs,
   saveConfig,
   testConnection,
 } = useVideoModelManager()
@@ -255,6 +256,7 @@ watch(
   (visible) => {
     if (!visible) return
     loadProviders()
+    loadConfigs()
 
     if (props.config) {
       formData.value = {
