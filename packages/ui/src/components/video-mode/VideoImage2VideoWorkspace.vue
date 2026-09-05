@@ -410,6 +410,7 @@ const handleFirstFrameFileChange = (e: Event) => {
 const clearFirstFrame = () => {
   session.inputImageB64 = null
   session.inputImageMime = null
+  session.inputImageId = null
   if (firstFrameInputRef.value) {
     firstFrameInputRef.value.value = ''
   }

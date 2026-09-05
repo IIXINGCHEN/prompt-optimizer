@@ -1,6 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getPiniaServices } from '../../plugins/pinia'
+import {
+  VIDEO_IMAGE2VIDEO_SESSION_KEY,
+  computeStableImageId,
+  scheduleImageStorageGc,
+  queueImageStorageMaintenance,
+} from './imageStorageMaintenance'
 import type {
   VideoResult,
   VideoTask,
@@ -29,8 +35,10 @@ export interface VideoImage2VideoSessionState {
   versionId: string
 
   inputImageB64: string | null
+  inputImageId: string | null
   inputImageMime: string | null
   endImageB64: string | null
+  endImageId: string | null
   endImageMime: string | null
 
   selectedTextModelKey: string
@@ -56,6 +64,41 @@ const DEFAULT_VARIANTS: Record<VideoTestVariantId, VideoTestVariantConfig> = {
   d: { id: 'd', version: 'workspace', modelKey: '', duration: 5, aspectRatio: '16:9' },
 }
 
+const sanitizeVariantResultsForSnapshot = (
+  results: Record<VideoTestVariantId, VideoResult | null>
+): Record<VideoTestVariantId, VideoResult | null> => {
+  const clean: Record<VideoTestVariantId, VideoResult | null> = {
+    a: null,
+    b: null,
+    c: null,
+    d: null,
+  }
+  for (const key of ['a', 'b', 'c', 'd'] as VideoTestVariantId[]) {
+    const item = results[key]
+    if (!item) {
+      clean[key] = null
+      continue
+    }
+    let videoUrl = item.video?.url
+    if (videoUrl && videoUrl.startsWith('data:')) {
+      videoUrl = ''
+    }
+    let coverUrl = item.video?.coverImageUrl
+    if (coverUrl && coverUrl.startsWith('data:')) {
+      coverUrl = ''
+    }
+    clean[key] = {
+      ...item,
+      video: {
+        ...item.video,
+        url: videoUrl,
+        coverImageUrl: coverUrl,
+      },
+    }
+  }
+  return clean
+}
+
 export const useVideoImage2VideoSession = defineStore('session-video-image2video', () => {
   const originalPrompt = ref('')
   const optimizedPrompt = ref('')
@@ -67,6 +110,7 @@ export const useVideoImage2VideoSession = defineStore('session-video-image2video
   const inputImageId = ref<string | null>(null)
   const inputImageMime = ref<string | null>(null)
   const endImageB64 = ref<string | null>(null)
+  const endImageId = ref<string | null>(null)
   const endImageMime = ref<string | null>(null)
 
   const selectedTextModelKey = ref('')
@@ -107,6 +151,7 @@ export const useVideoImage2VideoSession = defineStore('session-video-image2video
     inputImageId.value = null
     inputImageMime.value = null
     endImageB64.value = null
+    endImageId.value = null
     endImageMime.value = null
     variantResults.value = { a: null, b: null, c: null, d: null }
     variantTasks.value = { a: null, b: null, c: null, d: null }
@@ -114,63 +159,109 @@ export const useVideoImage2VideoSession = defineStore('session-video-image2video
   }
 
   const saveSession = async () => {
-    const $services = getPiniaServices()
-    if (!$services?.preferenceService) return
+    return await queueImageStorageMaintenance(async () => {
+      const $services = getPiniaServices()
+      if (!$services?.preferenceService) return
 
-    let imageIdToSave = inputImageId.value
-    if (inputImageB64.value && $services.imageStorageService) {
-      if (!imageIdToSave) {
+      let imageIdToSave: string | null = null
+      if (inputImageB64.value && $services.imageStorageService) {
         try {
-          const id = `img_v_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+          const normalizedMime = inputImageMime.value || 'image/png'
           const raw = inputImageB64.value.startsWith('data:')
             ? inputImageB64.value.split(',')[1]
             : inputImageB64.value
-          await $services.imageStorageService.saveImage({
-            metadata: {
-              id,
-              mimeType: inputImageMime.value || 'image/png',
-              sizeBytes: Math.floor(raw.length * 0.75),
-              createdAt: Date.now(),
-              accessedAt: Date.now(),
-              source: 'uploaded',
-            },
-            data: raw,
-          })
-          imageIdToSave = id
-          inputImageId.value = id
+          const stableId = await computeStableImageId(raw, normalizedMime)
+          const existing = await $services.imageStorageService.getMetadata(stableId)
+          if (!existing) {
+            await $services.imageStorageService.saveImage({
+              metadata: {
+                id: stableId,
+                mimeType: normalizedMime,
+                sizeBytes: Math.floor(raw.length * 0.75),
+                createdAt: Date.now(),
+                accessedAt: Date.now(),
+                source: 'uploaded',
+              },
+              data: raw,
+            })
+          }
+          imageIdToSave = stableId
+          inputImageId.value = stableId
         } catch (e) {
           console.warn('[VideoSession] Failed to persist input image to storage:', e)
         }
+      } else if (!inputImageB64.value) {
+        inputImageId.value = null
       }
-    }
 
-    const snapshot = {
-      originalPrompt: originalPrompt.value,
-      optimizedPrompt: optimizedPrompt.value,
-      reasoning: reasoning.value,
-      chainId: chainId.value,
-      versionId: versionId.value,
-      inputImageId: imageIdToSave,
-      inputImageMime: inputImageMime.value,
-      endImageMime: endImageMime.value,
-      selectedTextModelKey: selectedTextModelKey.value,
-      selectedTemplateId: selectedTemplateId.value,
-      selectedIterateTemplateId: selectedIterateTemplateId.value,
-      mainSplitLeftPct: mainSplitLeftPct.value,
-      testColumnCount: testColumnCount.value,
-      variants: variants.value,
-      variantResults: variantResults.value,
-      origin: origin.value,
-      assetBinding: assetBinding.value,
-      lastActiveAt: Date.now(),
-    }
-    await $services.preferenceService.set('session/v1/video-image2video', JSON.stringify(snapshot))
+      let endImageIdToSave: string | null = null
+      if (endImageB64.value && $services.imageStorageService) {
+        try {
+          const normalizedMime = endImageMime.value || 'image/png'
+          const raw = endImageB64.value.startsWith('data:')
+            ? endImageB64.value.split(',')[1]
+            : endImageB64.value
+          const stableId = await computeStableImageId(raw, normalizedMime)
+          const existing = await $services.imageStorageService.getMetadata(stableId)
+          if (!existing) {
+            await $services.imageStorageService.saveImage({
+              metadata: {
+                id: stableId,
+                mimeType: normalizedMime,
+                sizeBytes: Math.floor(raw.length * 0.75),
+                createdAt: Date.now(),
+                accessedAt: Date.now(),
+                source: 'uploaded',
+              },
+              data: raw,
+            })
+          }
+          endImageIdToSave = stableId
+          endImageId.value = stableId
+        } catch (e) {
+          console.warn('[VideoSession] Failed to persist end image to storage:', e)
+        }
+      } else if (!endImageB64.value) {
+        endImageId.value = null
+      }
+
+      const snapshot = {
+        originalPrompt: originalPrompt.value,
+        optimizedPrompt: optimizedPrompt.value,
+        reasoning: reasoning.value,
+        chainId: chainId.value,
+        versionId: versionId.value,
+        inputImageId: imageIdToSave,
+        inputImageMime: inputImageMime.value,
+        endImageId: endImageIdToSave,
+        endImageMime: endImageMime.value,
+        selectedTextModelKey: selectedTextModelKey.value,
+        selectedTemplateId: selectedTemplateId.value,
+        selectedIterateTemplateId: selectedIterateTemplateId.value,
+        mainSplitLeftPct: mainSplitLeftPct.value,
+        testColumnCount: testColumnCount.value,
+        variants: variants.value,
+        variantResults: sanitizeVariantResultsForSnapshot(variantResults.value),
+        origin: origin.value,
+        assetBinding: assetBinding.value,
+        lastActiveAt: Date.now(),
+      }
+
+      try {
+        await $services.preferenceService.set(VIDEO_IMAGE2VIDEO_SESSION_KEY, JSON.stringify(snapshot))
+        if ($services.imageStorageService) {
+          scheduleImageStorageGc($services.preferenceService, $services.imageStorageService)
+        }
+      } catch (e) {
+        console.warn('[VideoSession] Failed to save session preference:', e)
+      }
+    })
   }
 
   const restoreSession = async () => {
     const $services = getPiniaServices()
     if (!$services?.preferenceService) return
-    const raw = await $services.preferenceService.get<string | null>('session/v1/video-image2video', null)
+    const raw = await $services.preferenceService.get<string | null>(VIDEO_IMAGE2VIDEO_SESSION_KEY, null)
     if (!raw) return
     try {
       const data = typeof raw === 'string' ? JSON.parse(raw) : raw
@@ -197,8 +288,23 @@ export const useVideoImage2VideoSession = defineStore('session-video-image2video
           inputImageB64.value = data.inputImageB64
           inputImageMime.value = data.inputImageMime || 'image/png'
         }
-        if (data.endImageB64 !== undefined) endImageB64.value = data.endImageB64
-        if (data.endImageMime !== undefined) endImageMime.value = data.endImageMime
+        if (data.endImageId) {
+          endImageId.value = data.endImageId
+          if ($services.imageStorageService) {
+            try {
+              const fullImg = await $services.imageStorageService.getImage(data.endImageId)
+              if (fullImg) {
+                endImageB64.value = `data:${fullImg.metadata.mimeType || 'image/png'};base64,${fullImg.data}`
+                endImageMime.value = fullImg.metadata.mimeType || 'image/png'
+              }
+            } catch (e) {
+              console.warn('[VideoSession] Failed to restore end image from storage:', e)
+            }
+          }
+        } else if (data.endImageB64) {
+          endImageB64.value = data.endImageB64
+          endImageMime.value = data.endImageMime || 'image/png'
+        }
         if (data.selectedTextModelKey !== undefined) selectedTextModelKey.value = data.selectedTextModelKey
         if (data.selectedTemplateId !== undefined) selectedTemplateId.value = data.selectedTemplateId
         if (data.selectedIterateTemplateId !== undefined) selectedIterateTemplateId.value = data.selectedIterateTemplateId
@@ -220,8 +326,10 @@ export const useVideoImage2VideoSession = defineStore('session-video-image2video
     chainId,
     versionId,
     inputImageB64,
+    inputImageId,
     inputImageMime,
     endImageB64,
+    endImageId,
     endImageMime,
     selectedTextModelKey,
     selectedTemplateId,

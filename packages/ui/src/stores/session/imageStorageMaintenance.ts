@@ -5,6 +5,7 @@ export const BASIC_SYSTEM_SESSION_KEY = 'session/v1/basic-system'
 export const IMAGE_TEXT2IMAGE_SESSION_KEY = 'session/v1/image-text2image'
 export const IMAGE_IMAGE2IMAGE_SESSION_KEY = 'session/v1/image-image2image'
 export const IMAGE_MULTIIMAGE_SESSION_KEY = 'session/v1/image-multiimage'
+export const VIDEO_IMAGE2VIDEO_SESSION_KEY = 'session/v1/video-image2video'
 export const FAVORITES_STORAGE_KEY = 'favorites'
 
 type FavoritesPayloadProvider = () => Promise<unknown> | unknown
@@ -171,11 +172,12 @@ async function collectReferencedImageIds(
 ): Promise<Set<string>> {
   const referenced = new Set<string>()
 
-  const [rawBasicSystem, rawText2Image, rawImage2Image, rawMultiImage, rawFavorites] = await Promise.all([
+  const [rawBasicSystem, rawText2Image, rawImage2Image, rawMultiImage, rawVideoImage2Video, rawFavorites] = await Promise.all([
     preferenceService.get<unknown>(BASIC_SYSTEM_SESSION_KEY, null),
     preferenceService.get<unknown>(IMAGE_TEXT2IMAGE_SESSION_KEY, null),
     preferenceService.get<unknown>(IMAGE_IMAGE2IMAGE_SESSION_KEY, null),
     preferenceService.get<unknown>(IMAGE_MULTIIMAGE_SESSION_KEY, null),
+    preferenceService.get<unknown>(VIDEO_IMAGE2VIDEO_SESSION_KEY, null),
     preferenceService.get<unknown>(FAVORITES_STORAGE_KEY, null),
   ])
 
@@ -183,6 +185,7 @@ async function collectReferencedImageIds(
   const text2Image = parseSnapshot(rawText2Image)
   const image2Image = parseSnapshot(rawImage2Image)
   const multiImage = parseSnapshot(rawMultiImage)
+  const videoImage2Video = parseSnapshot(rawVideoImage2Video)
   const favorites = parseStoredValue(rawFavorites)
 
   if (basicSystem) {
@@ -204,6 +207,17 @@ async function collectReferencedImageIds(
   if (multiImage) {
     collectImageRefIds(multiImage, referenced)
     collectMultiImageInputAssetIds(multiImage, referenced)
+  }
+
+  if (videoImage2Video) {
+    const inputImageId = videoImage2Video['inputImageId']
+    if (typeof inputImageId === 'string' && inputImageId) {
+      referenced.add(inputImageId)
+    }
+    const endImageId = videoImage2Video['endImageId']
+    if (typeof endImageId === 'string' && endImageId) {
+      referenced.add(endImageId)
+    }
   }
 
   // Backward compatibility: some builds stored favorites inside preference payload.
