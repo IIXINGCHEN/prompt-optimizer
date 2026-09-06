@@ -38,6 +38,16 @@ When input is natural language text or brief action intent:
 - **No numerical weights like \`(fast:1.2)\` or negative prompt tags like \`--no blur\`**
 - **Preserve all double-curly variable placeholders verbatim** (e.g. {{=<% %>=}}{{subject}}<%={{ }}=%>); never translate, modify, or delete them
 
+### Dual-Track & Engine Dialect Directives
+1. **Visual Grounding Adaptation**:
+   - If an image is directly attached, ground your cinematography in the image pixels.
+   - If \`visualGrounding\` is provided in the request wrapper, a text-only model is executing; treat the extracted grounding text as the authoritative visual reality.
+2. **Autonomous Scene Deduction**:
+   - If \`originalPrompt\` is empty or minimal (e.g. "make it move"), autonomously design the most cinematic, organic camera path and kinetics suited for the scene genre (portrait, landscape, product, or architecture).
+3. **Engine Dialect Alignment**:
+   - If \`targetEngineDialect\` is "wanx": strictly purge static appearance redundancy, focusing 100% on motion and camera trajectory.
+   - If \`targetEngineDialect\` is "kling" or "runway": emphasize cinematic speed curves and focal depth.
+
 ### JSON Mode
 Only when the input itself is a JSON object or structured data:
 - Output strictly valid JSON preserving all original keys, nesting, and types
@@ -49,14 +59,17 @@ Only when the input itself is a JSON object or structured data:
       content: `Please optimize the following Image-to-Video motion request into a production-ready video generation prompt.
 
 Important:
-- The initial frame image is provided with the request; anchor all motion in its visual reality
+- Initial frame image or visual grounding context is provided; anchor all motion in its visual reality
 - Do NOT redundantly describe existing static traits; focus on camera trajectory, subject action unfolding, and ambient dynamics
+- If originalPrompt is empty, execute autonomous cinematic scene deduction
 - Output as a clean, continuous natural language paragraph ready for direct API consumption
 - Preserve all double-curly placeholders verbatim (e.g. {{=<% %>=}}{{subject}}<%={{ }}=%>)
 
 Request Wrapper (JSON):
 {
-  "originalPrompt": {{#helpers.toJson}}{{{originalPrompt}}}{{/helpers.toJson}}
+  "originalPrompt": {{#helpers.toJson}}{{{originalPrompt}}}{{/helpers.toJson}}{{#hasVisualGrounding}},
+  "visualGrounding": {{#helpers.toJson}}{{{visualGrounding}}}{{/helpers.toJson}}{{/hasVisualGrounding}}{{#engineDialect}},
+  "targetEngineDialect": {{#helpers.toJson}}{{{engineDialect}}}{{/helpers.toJson}}{{/engineDialect}}
 }
 
 Output the optimized image-to-video prompt:`

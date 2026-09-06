@@ -76,6 +76,11 @@ export type ImageSubMode = "text2image" | "image2image" | "multiimage"; // 图�
 export type VideoSubMode = "image2video"; // 视频模式
 
 /**
+ * 视频目标引擎方言类型
+ */
+export type VideoEngineDialect = "general" | "wanx" | "kling" | "runway" | "hailuo" | "cogvideo";
+
+/**
  * 优化请求接口
  */
 export interface OptimizationRequest {
@@ -84,6 +89,10 @@ export interface OptimizationRequest {
   templateId?: string;
   modelKey: string;
   inputImages?: ImageInputRef[];
+  // 🆕 图生视频两阶段视觉上下文（由 Vision 模型提取后注入纯文本模型）
+  visualGrounding?: string;
+  // 🆕 图生视频目标引擎方言定制（如 wanx, kling, runway 等）
+  engineDialect?: VideoEngineDialect;
   // 🆕 上下文模式（用于变量替换策略）
   contextMode?: import("../context/types").ContextMode;
   // 新增：高级模式上下文（可选，保持向后兼容）

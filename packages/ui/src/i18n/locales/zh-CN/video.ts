@@ -11,7 +11,21 @@ const messages = {
       "originalPromptPlaceholder": "请输入对视频运镜、主体动作、时序节奏的动态描述",
       "firstFrameImage": "首帧输入图像",
       "selectFirstFrame": "选择首帧",
-      "promptRequired": "请输入生成提示词"
+      "promptRequired": "请输入生成提示词",
+      "autonomousDeduce": "自主运镜推演",
+      "autonomousDeduceRecordTag": "[基于首帧画面自主推演]",
+      "engineDialect": "目标引擎方言",
+      "dialectAuto": "自动匹配测试模型",
+      "dialectGeneral": "通用好莱坞电影镜头",
+      "dialectWanx": "WanX 万相（强化首帧去冗余）",
+      "dialectKling": "Kling 可灵（运动笔刷与连贯性）",
+      "dialectRunway": "Runway Gen-3（精炼摄影机流）",
+      "dialectHailuo": "Hailuo 海螺（真实物理动态）",
+      "dialectCogVideo": "CogVideoX（时空动力学）"
+    },
+    "optimizingPhase": {
+      "grounding": "👁️ 正在解析首帧视觉特征...",
+      "synthesizing": "⚡ 正在生成工业级视频提示词..."
     }
   },
   "video": {

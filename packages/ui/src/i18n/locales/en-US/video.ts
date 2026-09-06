@@ -11,7 +11,21 @@ const messages = {
       "originalPromptPlaceholder": "Describe camera trajectories, subject actions, and temporal pacing",
       "firstFrameImage": "First Frame Image",
       "selectFirstFrame": "Select First Frame",
-      "promptRequired": "Please enter a generation prompt"
+      "promptRequired": "Please enter a generation prompt",
+      "autonomousDeduce": "Autonomous Camera Deduction",
+      "autonomousDeduceRecordTag": "[Autonomous Scene Deduction]",
+      "engineDialect": "Target Engine Dialect",
+      "dialectAuto": "Auto-sync with test model",
+      "dialectGeneral": "Universal Hollywood Cinematography",
+      "dialectWanx": "WanX (Strict first-frame non-redundancy)",
+      "dialectKling": "Kling (Motion brush & coherence)",
+      "dialectRunway": "Runway Gen-3 (Cinematic camera glide)",
+      "dialectHailuo": "Hailuo (Physical dynamic fidelity)",
+      "dialectCogVideo": "CogVideoX (Spatial-temporal dynamics)"
+    },
+    "optimizingPhase": {
+      "grounding": "👁️ Analyzing visual grounding...",
+      "synthesizing": "⚡ Synthesizing video prompt..."
     }
   },
   "video": {

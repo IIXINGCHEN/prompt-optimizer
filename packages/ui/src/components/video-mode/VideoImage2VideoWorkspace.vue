@@ -84,8 +84,8 @@
               </NSpace>
 
               <!-- 文本模型与模板选择 -->
-              <NGrid :cols="24" :x-gap="8" responsive="screen">
-                <NGridItem :span="8" :xs="24" :sm="8">
+              <NGrid :cols="24" :x-gap="8" :y-gap="8" responsive="screen">
+                <NGridItem :span="12" :xs="24" :sm="12">
                   <NSpace vertical :size="4">
                     <NFlex justify="space-between" align="center">
                       <NText depth="3" style="font-size: 12px;">
@@ -113,7 +113,7 @@
                   </NSpace>
                 </NGridItem>
 
-                <NGridItem :span="10" :xs="24" :sm="10">
+                <NGridItem :span="12" :xs="24" :sm="12">
                   <NSpace vertical :size="4">
                     <NFlex justify="space-between" align="center">
                       <NText depth="3" style="font-size: 12px;">
@@ -141,17 +141,38 @@
                   </NSpace>
                 </NGridItem>
 
-                <!-- 优化按钮 -->
-                <NGridItem :span="6" :xs="24" :sm="6" class="flex items-end justify-end">
+                <!-- 目标引擎方言选择 -->
+                <NGridItem :span="14" :xs="24" :sm="14">
+                  <NSpace vertical :size="4">
+                    <NFlex justify="space-between" align="center">
+                      <NText depth="3" style="font-size: 12px;">
+                        {{ t('videoWorkspace.input.engineDialect') }}
+                      </NText>
+                      <NTag size="tiny" round type="info" :bordered="false">
+                        {{ activeDialectLabel }}
+                      </NTag>
+                    </NFlex>
+                    <NSelect
+                      v-model:value="selectedDialect"
+                      :options="dialectOptions"
+                      size="small"
+                      :disabled="isOptimizing"
+                    />
+                  </NSpace>
+                </NGridItem>
+
+                <!-- 优化按钮（支持纯图自主推演） -->
+                <NGridItem :span="10" :xs="24" :sm="10" class="flex items-end justify-end">
                   <NButton
                     type="primary"
                     size="small"
+                    block
                     data-testid="video-image2video-optimize-button"
                     :loading="isOptimizing"
-                    :disabled="isOptimizing || !session.originalPrompt.trim() || !session.inputImageB64"
+                    :disabled="isOptimizing || !session.inputImageB64"
                     @click="handleOptimizePrompt"
                   >
-                    {{ isOptimizing ? t('common.loading') : t('promptOptimizer.optimize') }}
+                    {{ optimizeButtonText }}
                   </NButton>
                 </NGridItem>
               </NGrid>
@@ -351,11 +372,20 @@ import PromptPanelUI from '../PromptPanel.vue'
 import PromptPreviewPanel from '../PromptPreviewPanel.vue'
 import AppVideoPlayer from './AppVideoPlayer.vue'
 import { useWorkspaceTextModelSelection } from '../../composables/workspaces/useWorkspaceTextModelSelection'
+import { useFunctionModelManager } from '../../composables/model/useFunctionModelManager'
 import {
   useVideoImage2VideoSession,
   type VideoTestVariantId,
 } from '../../stores/session/useVideoImage2VideoSession'
-import type { VideoModelConfig, PromptRecord, Template } from '@prompt-optimizer/core'
+import {
+  isVisionCapableModel,
+  extractVisualGrounding,
+  type VideoModelConfig,
+  type PromptRecord,
+  type Template,
+  type VideoEngineDialect,
+  type OptimizationRequest,
+} from '@prompt-optimizer/core'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -364,6 +394,7 @@ const services = inject<Ref<AppServices | null>>('services', ref(null))
 const appOpenModelManager = inject<((tab?: string) => void) | null>('openModelManager', null)
 const appOpenTemplateManager = inject<((type?: string) => void) | null>('openTemplateManager', null)
 
+const functionModelManager = useFunctionModelManager(services)
 const textModelSelection = useWorkspaceTextModelSelection(services, session)
 const textModelOptions = textModelSelection.textModelOptions
 const selectedTextModelKey = textModelSelection.selectedTextModelKey
@@ -374,6 +405,58 @@ const mainSplitLeftPct = ref(38)
 
 const isOptimizing = ref(false)
 const isIterating = ref(false)
+const optimizingPhase = ref<'idle' | 'grounding' | 'synthesizing'>('idle')
+const selectedDialect = ref<string>('auto')
+
+const dialectOptions = computed(() => [
+  { label: t('videoWorkspace.input.dialectAuto'), value: 'auto' },
+  { label: t('videoWorkspace.input.dialectGeneral'), value: 'general' },
+  { label: t('videoWorkspace.input.dialectWanx'), value: 'wanx' },
+  { label: t('videoWorkspace.input.dialectKling'), value: 'kling' },
+  { label: t('videoWorkspace.input.dialectRunway'), value: 'runway' },
+  { label: t('videoWorkspace.input.dialectHailuo'), value: 'hailuo' },
+  { label: t('videoWorkspace.input.dialectCogVideo'), value: 'cogvideo' },
+])
+
+const resolvedDialect = computed<VideoEngineDialect>(() => {
+  if (selectedDialect.value !== 'auto') {
+    return selectedDialect.value as VideoEngineDialect
+  }
+  const key = (session.variants.a?.modelKey || videoModelOptions.value[0]?.value || '').toLowerCase()
+  if (key.includes('wan')) return 'wanx'
+  if (key.includes('cogvideo')) return 'cogvideo'
+  if (key.includes('kling')) return 'kling'
+  if (key.includes('runway')) return 'runway'
+  if (key.includes('hailuo') || key.includes('minimax')) return 'hailuo'
+  return 'general'
+})
+
+const activeDialectLabel = computed(() => {
+  const map: Record<VideoEngineDialect, string> = {
+    general: '通用标准',
+    wanx: 'WanX 万相',
+    kling: 'Kling 可灵',
+    runway: 'Runway',
+    hailuo: 'Hailuo 海螺',
+    cogvideo: 'CogVideoX',
+  }
+  return map[resolvedDialect.value] || '通用'
+})
+
+const optimizeButtonText = computed(() => {
+  if (isOptimizing.value) {
+    if (optimizingPhase.value === 'grounding') {
+      return t('videoWorkspace.optimizingPhase.grounding')
+    }
+    if (optimizingPhase.value === 'synthesizing') {
+      return t('videoWorkspace.optimizingPhase.synthesizing')
+    }
+    return t('common.loading')
+  }
+  return session.originalPrompt.trim()
+    ? t('promptOptimizer.optimize')
+    : t('videoWorkspace.input.autonomousDeduce')
+})
 const selectedIterateTemplate = ref<Template | null>(null)
 const variantRunning = ref<Record<VideoTestVariantId, boolean>>({
   a: false,
@@ -475,10 +558,6 @@ const handleClearContent = () => {
 }
 
 const handleOptimizePrompt = async () => {
-  if (!session.originalPrompt.trim()) {
-    toast.error(t('videoWorkspace.input.promptRequired'))
-    return
-  }
   if (!session.inputImageB64) {
     toast.error(t('videoWorkspace.input.selectFirstFrame'))
     return
@@ -493,35 +572,83 @@ const handleOptimizePrompt = async () => {
     return
   }
 
-  const textConfig = await services?.value?.modelManager?.getModel(session.selectedTextModelKey)
+  const textConfig = await services.value.modelManager?.getModel(session.selectedTextModelKey)
   if (textConfig && !textConfig.enabled) {
     toast.warning(t('modelManager.modelDisabled', { name: textConfig.name || session.selectedTextModelKey }))
     appOpenModelManager?.('text')
     return
   }
 
+  const rawB64 = session.inputImageB64.includes(',')
+    ? session.inputImageB64.split(',')[1]
+    : session.inputImageB64
+
+  // 纯图自主推演 vs 用户指定动态意图
+  const isAutonomousDeduction = !session.originalPrompt.trim()
+  const effectivePrompt = isAutonomousDeduction
+    ? '【自主镜头推演】请深度分析当前首帧画面，自主设计最具电影感与动态张力的视频镜头轨迹与主体动作'
+    : session.originalPrompt.trim()
+
   isOptimizing.value = true
   session.optimizedPrompt = ''
   session.reasoning = ''
 
   try {
-    const rawB64 = session.inputImageB64.includes(',')
-      ? session.inputImageB64.split(',')[1]
-      : session.inputImageB64
+    const isMultimodal = isVisionCapableModel(textConfig)
+    let visualGroundingContext: string | undefined
+
+    // 轨 2：所选模型为纯文本大模型，触发两阶段流水线
+    if (!isMultimodal) {
+      optimizingPhase.value = 'grounding'
+      const visionModelKey = functionModelManager.effectiveImageRecognitionModel.value
+      if (!visionModelKey) {
+        toast.warning('当前所选优化模型为纯文本大模型（如 DeepSeek/o1 等）。请先在「模型管理」->「功能模型」中配置图像识别模型，以启用首帧视觉特征自动解析。')
+        appOpenModelManager?.('function')
+        isOptimizing.value = false
+        optimizingPhase.value = 'idle'
+        return
+      }
+
+      const visionConfig = await services.value.modelManager?.getModel(visionModelKey)
+      if (!visionConfig || !visionConfig.enabled) {
+        toast.warning(`图像识别模型「${visionModelKey}」未启用或未配置，已为您打开模型管理。`)
+        appOpenModelManager?.('function')
+        isOptimizing.value = false
+        optimizingPhase.value = 'idle'
+        return
+      }
+
+      visualGroundingContext = await extractVisualGrounding({
+        modelConfig: visionConfig,
+        imageB64: rawB64,
+        mimeType: session.inputImageMime || 'image/png',
+        dynamicIntent: session.originalPrompt.trim(),
+      })
+    }
+
+    // 轨 1 或 轨 2 的 Stage 2：流式生成视频提示词
+    optimizingPhase.value = 'synthesizing'
+
+    const request: OptimizationRequest = {
+      optimizationMode: 'user',
+      targetPrompt: effectivePrompt,
+      templateId: session.selectedTemplateId,
+      modelKey: session.selectedTextModelKey,
+      engineDialect: resolvedDialect.value,
+      ...(visualGroundingContext
+        ? { visualGrounding: visualGroundingContext }
+        : {
+            inputImages: [
+              {
+                b64: rawB64,
+                mimeType: session.inputImageMime || 'image/png',
+              },
+            ],
+          }),
+    }
 
     await services.value.promptService.optimizePromptStream(
-      {
-        optimizationMode: 'user',
-        targetPrompt: session.originalPrompt,
-        templateId: session.selectedTemplateId,
-        modelKey: session.selectedTextModelKey,
-        inputImages: [
-          {
-            b64: rawB64,
-            mimeType: session.inputImageMime || 'image/png',
-          },
-        ],
-      },
+      request,
       {
         onToken: (token) => {
           session.optimizedPrompt += token
@@ -530,9 +657,13 @@ const handleOptimizePrompt = async () => {
           session.reasoning += token
         },
         onComplete: () => {
+          const effectiveOriginalRecord = isAutonomousDeduction
+            ? t('videoWorkspace.input.autonomousDeduceRecordTag')
+            : session.originalPrompt
+
           const newVer: PromptRecord = {
             id: `v_${Date.now()}`,
-            originalPrompt: session.originalPrompt,
+            originalPrompt: effectiveOriginalRecord,
             optimizedPrompt: session.optimizedPrompt,
             type: 'image2videoOptimize',
             chainId: session.chainId || 'chain_1',
@@ -542,6 +673,8 @@ const handleOptimizePrompt = async () => {
             templateId: session.selectedTemplateId,
             metadata: {
               reasoning: session.reasoning,
+              engineDialect: resolvedDialect.value,
+              visualGrounding: visualGroundingContext,
             },
           }
           currentVersions.value.push(newVer)
@@ -564,6 +697,7 @@ const handleOptimizePrompt = async () => {
     toast.error(err instanceof Error ? err.message : String(err))
   } finally {
     isOptimizing.value = false
+    optimizingPhase.value = 'idle'
   }
 }
 

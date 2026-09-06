@@ -11,7 +11,21 @@ const messages = {
       "originalPromptPlaceholder": "請輸入對影片運鏡、主體動作、時序節奏的動態描述",
       "firstFrameImage": "首幀輸入影像",
       "selectFirstFrame": "選擇首幀",
-      "promptRequired": "請輸入生成提示詞"
+      "promptRequired": "請輸入生成提示詞",
+      "autonomousDeduce": "自主運鏡推演",
+      "autonomousDeduceRecordTag": "[基於首幀畫面自主推演]",
+      "engineDialect": "目標引擎方言",
+      "dialectAuto": "自動符合測試模型",
+      "dialectGeneral": "通用好萊塢電影鏡頭",
+      "dialectWanx": "WanX 萬相（強化首幀去冗餘）",
+      "dialectKling": "Kling 可靈（運動筆刷與連貫性）",
+      "dialectRunway": "Runway Gen-3（精煉攝影機流）",
+      "dialectHailuo": "Hailuo 海螺（真實物理動態）",
+      "dialectCogVideo": "CogVideoX（時空動力學）"
+    },
+    "optimizingPhase": {
+      "grounding": "👁️ 正在解析首幀視覺特徵...",
+      "synthesizing": "⚡ 正在生成工業級影片提示詞..."
     }
   },
   "video": {

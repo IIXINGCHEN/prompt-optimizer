@@ -50,22 +50,36 @@ export const template: Template = {
 ### 三、工业级负面提示词（防崩清单）
 变脸，人物身份改变，五官漂移，脸型变化，肤色变化，年龄变化，发型发色变化，服装变化，配饰消失或变形，多余手指，缺少手指，手指融合扭曲，手部畸形，手臂畸形，关节反向弯曲，动作跳变断裂，瞬移，人物穿模，脚部悬空，物体悬浮，背景闪烁漂移，透视错误，物理关系失真，画面模糊失焦，重影拖影，噪点伪影，画面撕裂，镜头突然跳跃，低清晰度，卡顿不连续帧。
 
+## 双轨视觉与方言自适应规则
+1. **视觉信息来源自适应**：
+   - 若附带了图片输入，直接根据视觉感知进行分析；
+   - 若请求包装中包含 \`visualGrounding\` 字段，说明当前采用纯文本推理模型，你必须把 \`visualGrounding\` 中提炼的视觉特征视作首帧事实基准进行动作与镜头编排。
+2. **纯图自主镜头推演 (Autonomous Scene Deduction)**：
+   - 若用户 \`originalPrompt\` 为空、仅写了“动起来”或为简短占位词，启动自主电影镜头推演：依据画面主题（人像/商品/风光/建筑）自动设计最契合画面美学的镜头语言与物理动态。
+3. **目标引擎方言微调 (Target Engine Dialect)**：
+   - 若 \`targetEngineDialect\` 为 "wanx"：严格执行首帧特征去冗余，彻底剔除静态外貌复述，专注于机位轨迹与肢体动作展开，防止第一秒画风冲突重绘；
+   - 若为 "kling" 或 "runway"：强化电影级摄影机焦段与速度曲线描述；
+   - 若为 "general"：输出好莱坞工业标准通用镜头语言。
+
 ## 保真规则
 - 严格逐字保留所有原始双花括号占位符（例如 {{=<% %>=}}{{subject}}<%={{ }}=%>），严禁修改、翻译或删除
 - 纯文本输出，不包含任何 Markdown 代码块（\`\`\`）`
     },
     {
       role: 'user',
-      content: `请将以下图生视频动态需求，结合附带的首帧参考图，优化为电影工业级的全维度视频生成提示词。
+      content: `请将以下图生视频动态需求，结合附带的首帧参考图（或视觉锚定上下文），优化为电影工业级的全维度视频生成提示词。
 
 重要要求：
 - 严格遵循专业架构，做到全流程拆解完整、详尽，绝对不截断、不省略（严禁输出省略号）
 - 必须包含【完整提示词】板块与【工业级负面提示词】防崩清单
+- 若 originalPrompt 为空或极简，自动基于首帧视觉画面展开自主电影镜头推演
 - 保留所有双花括号占位符逐字不变（例如 {{=<% %>=}}{{subject}}<%={{ }}=%>）
 
 请求包装（JSON）：
 {
-  "originalPrompt": {{#helpers.toJson}}{{{originalPrompt}}}{{/helpers.toJson}}
+  "originalPrompt": {{#helpers.toJson}}{{{originalPrompt}}}{{/helpers.toJson}}{{#hasVisualGrounding}},
+  "visualGrounding": {{#helpers.toJson}}{{{visualGrounding}}}{{/helpers.toJson}}{{/hasVisualGrounding}}{{#engineDialect}},
+  "targetEngineDialect": {{#helpers.toJson}}{{{engineDialect}}}{{/helpers.toJson}}{{/engineDialect}}
 }
 
 请输出完整详尽、无截断的专业图生视频提示词：`

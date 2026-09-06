@@ -138,3 +138,56 @@ export function generateDynamicModels(): Record<string, TextModelConfig> {
 
   return dynamicModels;
 }
+
+/**
+ * 判断模型是否具备多模态视觉理解能力
+ */
+export function isVisionCapableModel(modelConfig?: TextModelConfig | null): boolean {
+  if (!modelConfig) return false;
+
+  // 1. 显式能力字段
+  const capabilities = (modelConfig.modelMeta as any)?.capabilities;
+  if (capabilities?.supportsVision === true || capabilities?.imageInput === true) {
+    return true;
+  }
+  if (capabilities?.supportsVision === false) {
+    return false;
+  }
+
+  // 2. 根据 providerId / modelId 启发式特征识别
+  const modelId = (modelConfig.modelId || modelConfig.id || '').toLowerCase();
+  const providerId = (modelConfig.providerId || modelConfig.providerMeta?.id || '').toLowerCase();
+
+  // 纯文本模型黑名单（常见不支持传图的纯文本大模型）
+  if (
+    modelId.includes('deepseek') ||
+    modelId.includes('o1-mini') ||
+    modelId.includes('o3-mini') ||
+    modelId === 'o1' ||
+    modelId === 'o1-preview' ||
+    (modelId.startsWith('qwen') && !modelId.includes('vl')) ||
+    modelId.includes('baichuan') ||
+    modelId.includes('yi-large') ||
+    modelId.includes('mistral')
+  ) {
+    return false;
+  }
+
+  // 典型多模态视觉模型白名单
+  if (
+    providerId.includes('google') ||
+    modelId.includes('gemini') ||
+    modelId.includes('gpt-4o') ||
+    modelId.includes('gpt-4-turbo') ||
+    modelId.includes('claude-3') ||
+    modelId.includes('claude-3-5') ||
+    modelId.includes('claude-3-7') ||
+    modelId.includes('vl') ||
+    modelId.includes('vision') ||
+    modelId.includes('multimodal')
+  ) {
+    return true;
+  }
+
+  return false;
+}

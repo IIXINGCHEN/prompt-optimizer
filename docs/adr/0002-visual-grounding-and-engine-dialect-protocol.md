@@ -1,0 +1,3 @@
+# 0002. Visual Grounding Injection Protocol and Engine Dialect Synchronization
+
+To enable text-only models to optimize Image-to-Video prompts without JSON parsing fragility, we decided to represent extracted visual grounding as compact, Markdown-structured semantic text injected via `{{visualGrounding}}` instead of rigid JSON schemas. Additionally, to provide zero-friction prompt alignment, the system defaults to synchronizing the target prompt engine dialect with the currently selected video generation model on the test deck, while preserving manual override capability for external export workflows.

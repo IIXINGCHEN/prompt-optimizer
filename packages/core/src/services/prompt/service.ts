@@ -930,6 +930,14 @@ export class PromptService implements IPromptService {
       hasInputImages: this.hasInputImages(request),
       inputImageCount: this.hasInputImages(request) ? request.inputImages.length : 0,
       inputImagesJson: this.buildInputImagesManifest(request),
+      visualGrounding: request.visualGrounding,
+      hasVisualGrounding: Boolean(request.visualGrounding?.trim()),
+      engineDialect: request.engineDialect || 'general',
+      isWanxDialect: request.engineDialect === 'wanx',
+      isKlingDialect: request.engineDialect === 'kling',
+      isRunwayDialect: request.engineDialect === 'runway',
+      isHailuoDialect: request.engineDialect === 'hailuo',
+      isCogVideoDialect: request.engineDialect === 'cogvideo',
     };
 
     const context = TemplateProcessor.createExtendedContext(

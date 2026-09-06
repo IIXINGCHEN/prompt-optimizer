@@ -78,6 +78,7 @@ export * from './services/model/metadata-resolver'
 export * from './services/model/parameter-schema'
 export * from './services/model/parameter-utils'
 export * from './services/model/advancedParameterDefinitions'
+export { isVisionCapableModel } from './services/model/model-utils'
 export { ElectronModelManagerProxy } from './services/model/electron-proxy'
 export { ElectronConfigManager, isElectronRenderer } from './services/model/electron-config'
 
