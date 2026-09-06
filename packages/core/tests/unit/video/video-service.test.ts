@@ -28,7 +28,7 @@ describe('VideoService & VideoModelManager', () => {
 
   it('initializes default video model configs correctly', async () => {
     const configs = await modelManager.getAllConfigs()
-    expect(configs.length).toBeGreaterThanOrEqual(2)
+    expect(configs.length).toBeGreaterThanOrEqual(7)
 
     const wanConfig = configs.find((c) => c.providerId === 'dashscope')
     expect(wanConfig).toBeDefined()
@@ -38,6 +38,26 @@ describe('VideoService & VideoModelManager', () => {
     const sfConfig = configs.find((c) => c.providerId === 'siliconflow')
     expect(sfConfig).toBeDefined()
     expect(sfConfig?.modelId).toBe('THUDM/CogVideoX-5b-I2V')
+
+    const zpConfig = configs.find((c) => c.providerId === 'zhipu')
+    expect(zpConfig).toBeDefined()
+    expect(zpConfig?.modelId).toBe('cogvideox')
+
+    const mmConfig = configs.find((c) => c.providerId === 'minimax')
+    expect(mmConfig).toBeDefined()
+    expect(mmConfig?.modelId).toBe('video-01')
+
+    const klConfig = configs.find((c) => c.providerId === 'kling')
+    expect(klConfig).toBeDefined()
+    expect(klConfig?.modelId).toBe('kling-v1')
+
+    const rwConfig = configs.find((c) => c.providerId === 'runway')
+    expect(rwConfig).toBeDefined()
+    expect(rwConfig?.modelId).toBe('gen3a_turbo')
+
+    const vdConfig = configs.find((c) => c.providerId === 'vidu')
+    expect(vdConfig).toBeDefined()
+    expect(vdConfig?.modelId).toBe('vidu-high')
   })
 
   it('validates request rejects empty prompt', async () => {

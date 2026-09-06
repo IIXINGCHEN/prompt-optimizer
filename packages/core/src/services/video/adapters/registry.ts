@@ -9,6 +9,11 @@ import { VideoError } from '../errors'
 import { VIDEO_ERROR_CODES } from '../../../constants/error-codes'
 import { DashScopeVideoAdapter } from './dashscope'
 import { SiliconFlowVideoAdapter } from './siliconflow'
+import { ZhipuVideoAdapter } from './zhipu'
+import { MiniMaxVideoAdapter } from './minimax'
+import { KlingVideoAdapter } from './kling'
+import { RunwayVideoAdapter } from './runway'
+import { ViduVideoAdapter } from './vidu'
 
 export class VideoAdapterRegistry
   extends AbstractAdapterRegistry<
@@ -26,9 +31,19 @@ export class VideoAdapterRegistry
   protected initializeAdapters(): void {
     const dashscopeAdapter = new DashScopeVideoAdapter()
     const siliconflowAdapter = new SiliconFlowVideoAdapter()
+    const zhipuAdapter = new ZhipuVideoAdapter()
+    const minimaxAdapter = new MiniMaxVideoAdapter()
+    const klingAdapter = new KlingVideoAdapter()
+    const runwayAdapter = new RunwayVideoAdapter()
+    const viduAdapter = new ViduVideoAdapter()
 
     this.adapters.set('dashscope', dashscopeAdapter)
     this.adapters.set('siliconflow', siliconflowAdapter)
+    this.adapters.set('zhipu', zhipuAdapter)
+    this.adapters.set('minimax', minimaxAdapter)
+    this.adapters.set('kling', klingAdapter)
+    this.adapters.set('runway', runwayAdapter)
+    this.adapters.set('vidu', viduAdapter)
 
     this.preloadStaticModels()
   }
