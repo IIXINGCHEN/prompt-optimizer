@@ -161,8 +161,8 @@ export interface IVideoProviderAdapter {
   getModelsAsync(connectionConfig: Record<string, any>): Promise<VideoModel[]>
   buildDefaultModel(modelId: string): VideoModel
 
-  submitTask(request: Image2VideoRequest, config: VideoModelConfig): Promise<{ taskId: string }>
-  queryTask(taskId: string, config: VideoModelConfig): Promise<VideoTask>
+  submitTask(request: Image2VideoRequest, config: VideoModelConfig, signal?: AbortSignal): Promise<{ taskId: string }>
+  queryTask(taskId: string, config: VideoModelConfig, signal?: AbortSignal): Promise<VideoTask>
   cancelTask?(taskId: string, config: VideoModelConfig): Promise<boolean>
 
   generateVideo(

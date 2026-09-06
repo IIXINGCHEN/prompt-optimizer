@@ -146,7 +146,8 @@ export class DashScopeVideoAdapter extends AbstractVideoProviderAdapter {
 
   public async submitTask(
     request: Image2VideoRequest,
-    config: VideoModelConfig
+    config: VideoModelConfig,
+    signal?: AbortSignal
   ): Promise<{ taskId: string }> {
     const apiKey = config.connectionConfig?.apiKey?.trim()
     if (!apiKey) {
@@ -206,6 +207,7 @@ export class DashScopeVideoAdapter extends AbstractVideoProviderAdapter {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload),
+      signal,
     })
 
     if (!res.ok) {
@@ -248,7 +250,8 @@ export class DashScopeVideoAdapter extends AbstractVideoProviderAdapter {
 
   public async queryTask(
     taskId: string,
-    config: VideoModelConfig
+    config: VideoModelConfig,
+    signal?: AbortSignal
   ): Promise<VideoTask> {
     const apiKey = config.connectionConfig?.apiKey?.trim()
     if (!apiKey) {
@@ -261,10 +264,17 @@ export class DashScopeVideoAdapter extends AbstractVideoProviderAdapter {
       headers: {
         'Authorization': `Bearer ${apiKey}`,
       },
+      signal,
     })
 
     if (!res.ok) {
       const errText = await res.text()
+      // 4xx（除 408/429）视为永久性错误立即上抛；408/429/5xx 交给轮询引擎退避重试，
+      // 避免限流或瞬时 5xx 直接终止已计费的生成任务
+      const retryable = res.status === 408 || res.status === 429 || res.status >= 500
+      if (retryable) {
+        throw new Error(`DashScope query task transient error (${res.status}): ${errText}`)
+      }
       throw new VideoError(
         VIDEO_ERROR_CODES.TASK_POLLING_FAILED,
         `DashScope query task error (${res.status}): ${errText}`

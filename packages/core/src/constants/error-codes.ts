@@ -160,6 +160,8 @@ export const IMAGE_ERROR_CODES = {
 // Video generation errors | 视频生成错误
 export const VIDEO_ERROR_CODES = {
   CONFIG_NOT_FOUND: 'error.video.config_not_found',
+  CONFIG_ALREADY_EXISTS: 'error.video.config_already_exists',
+  CONFIG_INVALID: 'error.video.config_invalid',
   CONFIG_NOT_ENABLED: 'error.video.config_not_enabled',
   CONFIG_ID_EMPTY: 'error.video.config_id_empty',
   PROVIDER_NOT_FOUND: 'error.video.provider_not_found',

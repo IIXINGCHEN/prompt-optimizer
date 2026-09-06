@@ -11,6 +11,7 @@ export type WorkspaceApplyTargetKey =
   | 'image-text2image'
   | 'image-image2image'
   | 'image-multiimage'
+  | 'video-image2video'
 
 export const WORKSPACE_APPLY_TARGET_KEYS: ReadonlyArray<WorkspaceApplyTargetKey> = [
   'basic-system',
@@ -20,6 +21,7 @@ export const WORKSPACE_APPLY_TARGET_KEYS: ReadonlyArray<WorkspaceApplyTargetKey>
   'image-text2image',
   'image-image2image',
   'image-multiimage',
+  'video-image2video',
 ]
 
 export const isWorkspaceApplyTargetKey = (
@@ -47,6 +49,7 @@ export type WorkspaceExternalApplySessions = {
   imageText2ImageSession?: WorkspaceClearableSession & WorkspaceTemporaryVariablesSession
   imageImage2ImageSession?: WorkspaceClearableSession & WorkspaceTemporaryVariablesSession
   imageMultiImageSession?: WorkspaceClearableSession & WorkspaceTemporaryVariablesSession
+  videoImage2VideoSession?: WorkspaceClearableSession
   optimizerCurrentVersions?: Ref<PromptRecordChain['versions']>
 }
 
@@ -133,6 +136,11 @@ export const clearWorkspaceContentForExternalApply = (
 
   if (targetKey === 'image-multiimage') {
     api.imageMultiImageSession?.clearContent?.({ persist: false })
+    return true
+  }
+
+  if (targetKey === 'video-image2video') {
+    api.videoImage2VideoSession?.clearContent?.({ persist: false })
     return true
   }
 

@@ -4,7 +4,7 @@ import { useGlobalSettings, type GlobalSettingsApi } from '../stores/settings/us
 import { DEFAULT_WORKSPACE_PATH } from './workspaceRoutes'
 
 export const getInitialRouteFromGlobalSettings = (globalSettings: GlobalSettingsApi) => {
-  const { functionMode, basicSubMode, proSubMode, imageSubMode } = globalSettings.state
+  const { functionMode, basicSubMode, proSubMode, imageSubMode, videoSubMode } = globalSettings.state
 
   switch (functionMode) {
     case 'basic':
@@ -13,6 +13,8 @@ export const getInitialRouteFromGlobalSettings = (globalSettings: GlobalSettings
       return `/pro/${proSubMode}`
     case 'image':
       return `/image/${imageSubMode}`
+    case 'video':
+      return `/video/${videoSubMode || 'image2video'}`
     default:
       return DEFAULT_WORKSPACE_PATH
   }

@@ -105,6 +105,8 @@ const messages = {
       "prompt_empty": "视频提示词不能为空",
       "config_id_empty": "视频模型配置ID不能为空",
       "config_not_found": "未找到视频模型配置",
+      "config_already_exists": "视频模型配置已存在: {configId}",
+      "config_invalid": "视频模型配置无效: {configId}",
       "config_not_enabled": "视频模型配置未启用: {configName}，请先在模型管理中配置 API Key 并启用此模型",
       "provider_not_found": "未找到视频提供商: {providerId}",
       "input_image_required": "图生视频需要提供首帧图片",

@@ -5,6 +5,8 @@ const messages = {
   },
   "videoWorkspace": {
     "input": {
+      "template": "Optimize Template",
+      "templatePlaceholder": "Select an image-to-video optimize template",
       "originalPrompt": "Motion Intent & Prompt",
       "originalPromptPlaceholder": "Describe camera trajectories, subject actions, and temporal pacing",
       "firstFrameImage": "First Frame Image",

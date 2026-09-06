@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { DashScopeVideoAdapter } from '../../../src/services/video/adapters/dashscope'
 import { SiliconFlowVideoAdapter } from '../../../src/services/video/adapters/siliconflow'
+import { VIDEO_ERROR_CODES } from '../../../src/constants/error-codes'
 import type { VideoModelConfig } from '../../../src/services/video/types'
 
 describe('DashScopeVideoAdapter', () => {
@@ -28,14 +29,18 @@ describe('DashScopeVideoAdapter', () => {
   })
 
   it('submits task successfully', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        output: {
-          task_id: 'ds-task-999',
-          task_status: 'PENDING',
-        },
-      }),
+    let capturedBody: any
+    const mockFetch = vi.fn().mockImplementation(async (_url, opts) => {
+      capturedBody = JSON.parse(opts.body)
+      return {
+        ok: true,
+        json: async () => ({
+          output: {
+            task_id: 'ds-task-999',
+            task_status: 'PENDING',
+          },
+        }),
+      }
     })
     vi.stubGlobal('fetch', mockFetch)
 
@@ -49,6 +54,11 @@ describe('DashScopeVideoAdapter', () => {
     )
 
     expect(res.taskId).toBe('ds-task-999')
+    // 模型 ID 自动纠偏：wan2.1- 前缀必须映射为百炼商业 API 的 wanx2.1-
+    expect(capturedBody.model).toBe('wanx2.1-i2v-plus')
+    // prompt_extend 默认关闭，避免百炼后台二次扩写引发变脸与敏感词误杀
+    expect(capturedBody.parameters.prompt_extend).toBe(false)
+    expect(capturedBody.input.prompt).toBe('Camera panning right')
     expect(mockFetch).toHaveBeenCalledWith(
       expect.stringContaining('/services/aigc/video-generation/video-synthesis'),
       expect.objectContaining({
@@ -58,6 +68,27 @@ describe('DashScopeVideoAdapter', () => {
         }),
       })
     )
+  })
+
+  it('maps DataInspectionFailed to a descriptive localized error', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      text: async () => JSON.stringify({
+        code: 'DataInspectionFailed',
+        message: 'Input data may contain inappropriate content.',
+      }),
+    })
+    vi.stubGlobal('fetch', mockFetch)
+
+    await expect(
+      adapter.submitTask(
+        { prompt: 'test', configId: config.id, inputImage: { b64: 'b64' } },
+        config
+      )
+    ).rejects.toMatchObject({
+      code: VIDEO_ERROR_CODES.TASK_SUBMISSION_FAILED,
+    })
   })
 
   it('gracefully falls back to official DashScope endpoint when text compatible-mode URL is provided', async () => {

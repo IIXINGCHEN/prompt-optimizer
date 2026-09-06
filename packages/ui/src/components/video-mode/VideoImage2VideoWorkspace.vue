@@ -117,7 +117,7 @@
                   <NSpace vertical :size="4">
                     <NFlex justify="space-between" align="center">
                       <NText depth="3" style="font-size: 12px;">
-                        {{ t('imageWorkspace.input.template') }}
+                        {{ t('videoWorkspace.input.template') }}
                       </NText>
                       <NButton
                         v-if="appOpenTemplateManager"
@@ -136,7 +136,7 @@
                       :disabled="isOptimizing"
                       filterable
                       tag
-                      :placeholder="t('imageWorkspace.input.templatePlaceholder')"
+                      :placeholder="t('videoWorkspace.input.templatePlaceholder')"
                     />
                   </NSpace>
                 </NGridItem>
@@ -452,6 +452,8 @@ const handleFirstFrameFileChange = (e: Event) => {
     const res = reader.result as string
     session.inputImageB64 = res
     session.inputImageMime = file.type || 'image/png'
+    // 上传后立即持久化，避免崩溃/意外关闭丢失首帧
+    void session.saveSession()
   }
   reader.readAsDataURL(file)
 }
@@ -463,6 +465,7 @@ const clearFirstFrame = () => {
   if (firstFrameInputRef.value) {
     firstFrameInputRef.value.value = ''
   }
+  void session.saveSession()
 }
 
 const handleClearContent = () => {
@@ -543,6 +546,13 @@ const handleOptimizePrompt = async () => {
           }
           currentVersions.value.push(newVer)
           currentVersionId.value = newVer.id
+          // 经由 store action 持久化优化结果（刷新/切模式不丢失）
+          session.updateOptimizedResult({
+            optimizedPrompt: session.optimizedPrompt,
+            reasoning: session.reasoning,
+            chainId: session.chainId || 'chain_1',
+            versionId: newVer.id,
+          })
           toast.success(t('toast.success.optimizeSuccess'))
         },
         onError: (err) => {
@@ -596,6 +606,11 @@ const handleIteratePrompt = async (payload: { iterateInput: string }) => {
     }
     currentVersions.value.push(newVer)
     currentVersionId.value = newVer.id
+    session.updateOptimizedResult({
+      optimizedPrompt: result,
+      chainId: session.chainId || 'chain_1',
+      versionId: newVer.id,
+    })
     toast.success(t('toast.success.iterateSuccess'))
   } catch (err) {
     toast.error(err instanceof Error ? err.message : String(err))
@@ -616,53 +631,74 @@ const handleOpenPromptPreview = () => {
 
 const extractProductionPrompt = (text: string): string => {
   if (!text) return ''
-  const sectionMatch = text.match(
-    /(?:【完整\s*(?:Prompt|提示词)】|完整\s*(?:Prompt|提示词)[：:]|【成品\s*(?:Prompt|提示词|生成提示词)】|成品\s*(?:Prompt|提示词|生成提示词)[：:])\s*([\s\S]+?)(?=(?:\n\s*【|\n\s*#|\n\s*负面提示词|\n\s*Negative|$))/i
-  )
-  if (sectionMatch && sectionMatch[1]?.trim()) {
-    return sectionMatch[1].trim().replace(/^```[a-zA-Z]*\n?/, '').replace(/```$/, '').trim()
+  const MARKER = /(?:【完整\s*(?:Prompt|提示词)】|完整\s*(?:Prompt|提示词)[：:]|【成品\s*(?:Prompt|提示词|生成提示词)】|成品\s*(?:Prompt|提示词|生成提示词)[：:])/i
+  // 终止边界只认真正的下一板块标记（完整/成品/负面/Negative/编号大标题），
+  // 避免把提示词自身以【镜头…】/普通 # 开头的行误判为板块边界而截断。
+  const SECTION_BOUNDARY = /(?=(?:\n\s*【(?:完整|成品|负面|工业级|Negative)|\n\s*#{1,3}\s*(?:[一二三四五]、|Negative)|\n\s*负面提示词|\n\s*Negative\s*[：:]|\n\s*[一二三四五]、\s*(?:成品|完整|工业级)|$))/i
+  const stripFence = (s: string) => s.trim().replace(/^```[a-zA-Z]*\n/, '').replace(/```[\s\n]*$/, '').trim()
+
+  const sectionMatch = text.match(new RegExp(MARKER.source + '\\s*([\\s\\S]+?)' + SECTION_BOUNDARY.source))
+  if (sectionMatch?.[1]?.trim()) {
+    return stripFence(sectionMatch[1])
   }
 
-  const endMatch = text.match(
-    /(?:【完整\s*(?:Prompt|提示词)】|完整\s*(?:Prompt|提示词)[：:]|【成品\s*(?:Prompt|提示词|生成提示词)】|成品\s*(?:Prompt|提示词|生成提示词)[：:])\s*([\s\S]+)$/i
-  )
-  if (endMatch && endMatch[1]?.trim()) {
-    return endMatch[1].trim().replace(/^```[a-zA-Z]*\n?/, '').replace(/```$/, '').trim()
+  const endMatch = text.match(new RegExp(MARKER.source + '\\s*([\\s\\S]+)$'))
+  if (endMatch?.[1]?.trim()) {
+    return stripFence(endMatch[1])
   }
-  return text.trim()
+
+  // 兜底：模型未输出任何板块标记时，剔除负面提示词等元信息板块后再交付 API，
+  // 防止"变脸/畸形/撕裂"等负面词以正向语义进入视频模型。
+  const beforeNegative = text.split(/\n\s*(?:【?\s*(?:工业级)?负面提示词|[一二三四五]、\s*(?:工业级)?负面提示词|#{1,3}\s*[一二三四五]、\s*工业级负面|Negative\s*[：:])/i)[0]
+  const fallback = (beforeNegative.trim() || text.trim())
+    .replace(/^```[a-zA-Z]*\n/, '')
+    .replace(/```[\s\n]*$/, '')
+    .trim()
+  return fallback
 }
 
 const runVariant = async (id: VideoTestVariantId) => {
-  const configId = session.variants[id]?.modelKey
+  // 重入守卫：同一列运行中禁止重复启动（双击/运行中再点），避免双份计费与控制器互踩
+  if (variantRunning.value[id]) return
+  // 同步置位：防止 await 间隙内双击重入（TOCTOU）
+  variantRunning.value[id] = true
+
+  const variant = session.variants[id]
+  const configId = variant?.modelKey
   if (!configId) {
+    variantRunning.value[id] = false
     toast.error(t('video.config.selectModel'))
     return
   }
 
   const config = await services?.value?.videoModelManager?.getConfig(configId)
   if (config && !config.enabled) {
+    variantRunning.value[id] = false
     toast.warning(t('video.config.notEnabledWarning', { name: config.name || configId }))
     appOpenModelManager?.('video')
     return
   }
 
   if (!session.inputImageB64) {
+    variantRunning.value[id] = false
     toast.error(t('videoWorkspace.input.selectFirstFrame'))
     return
   }
   if (!services?.value?.videoService) {
-    toast.error('VideoService not available')
+    variantRunning.value[id] = false
+    toast.error(t('toast.error.serviceInit'))
     return
   }
 
-  const rawPrompt = session.optimizedPrompt || session.originalPrompt
-  if (!rawPrompt.trim()) {
+  // 变体语义落地：version=0（v0 原文）使用原始提示词，其余使用优化结果
+  const promptSource = variant?.version === 0 ? session.originalPrompt : (session.optimizedPrompt || session.originalPrompt)
+  if (!promptSource.trim()) {
+    variantRunning.value[id] = false
     toast.error(t('videoWorkspace.input.promptRequired'))
     return
   }
-  const promptText = extractProductionPrompt(rawPrompt)
+  const promptText = extractProductionPrompt(promptSource)
 
-  variantRunning.value[id] = true
   const controller = new AbortController()
   variantAbortControllers.set(id, controller)
 
@@ -675,6 +711,8 @@ const runVariant = async (id: VideoTestVariantId) => {
       {
         prompt: promptText,
         configId,
+        duration: variant?.duration,
+        aspectRatio: variant?.aspectRatio,
         inputImage: {
           b64: rawB64,
           mimeType: session.inputImageMime || 'image/png',
@@ -707,8 +745,12 @@ const runVariant = async (id: VideoTestVariantId) => {
       toast.error(err instanceof Error ? err.message : String(err))
     }
   } finally {
-    variantRunning.value[id] = false
-    variantAbortControllers.delete(id)
+    // 只有当控制器仍是当前运行的这一份时才清理状态；
+    // 若已被取消并重启（新控制器接管），旧运行的 finally 不得清掉新一轮的 running 标记
+    if (variantAbortControllers.get(id) === controller) {
+      variantAbortControllers.delete(id)
+      variantRunning.value[id] = false
+    }
   }
 }
 
@@ -716,6 +758,7 @@ const cancelVariant = (id: VideoTestVariantId) => {
   const controller = variantAbortControllers.get(id)
   if (controller) {
     controller.abort()
+    // running 标记交给对应运行的 finally 复位，避免取消后立即重启时被旧 finally 误清
     variantAbortControllers.delete(id)
     variantRunning.value[id] = false
   }
@@ -761,16 +804,31 @@ watch(
   { immediate: true }
 )
 
+const handleRestoreFavorite = (event: Event) => {
+  const detail = (event as CustomEvent).detail || {}
+  const content = typeof detail.content === 'string' ? detail.content : ''
+  if (!content) return
+  session.originalPrompt = content
+  void session.saveSession()
+}
+
 onMounted(async () => {
   await loadModels()
   if (typeof window !== 'undefined') {
     window.addEventListener('video-workspace-refresh-video-models', loadModels)
+    window.addEventListener('video-workspace-restore-favorite', handleRestoreFavorite)
   }
 })
 
 onUnmounted(() => {
+  // 离开工作区时中止所有进行中的生成任务，停止后续轮询与状态写入
+  for (const controller of variantAbortControllers.values()) {
+    controller.abort()
+  }
+  variantAbortControllers.clear()
   if (typeof window !== 'undefined') {
     window.removeEventListener('video-workspace-refresh-video-models', loadModels)
+    window.removeEventListener('video-workspace-restore-favorite', handleRestoreFavorite)
   }
 })
 </script>

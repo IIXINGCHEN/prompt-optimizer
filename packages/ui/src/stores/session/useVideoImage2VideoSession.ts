@@ -189,6 +189,8 @@ export const useVideoImage2VideoSession = defineStore('session-video-image2video
           inputImageId.value = stableId
         } catch (e) {
           console.warn('[VideoSession] Failed to persist input image to storage:', e)
+          // 保留既有引用，避免快照引用被清空后 GC 误删仍存在的图像资产
+          imageIdToSave = inputImageId.value
         }
       } else if (!inputImageB64.value) {
         inputImageId.value = null
@@ -220,6 +222,7 @@ export const useVideoImage2VideoSession = defineStore('session-video-image2video
           endImageId.value = stableId
         } catch (e) {
           console.warn('[VideoSession] Failed to persist end image to storage:', e)
+          endImageIdToSave = endImageId.value
         }
       } else if (!endImageB64.value) {
         endImageId.value = null
@@ -309,11 +312,40 @@ export const useVideoImage2VideoSession = defineStore('session-video-image2video
         if (data.selectedTemplateId !== undefined) selectedTemplateId.value = data.selectedTemplateId
         if (data.selectedIterateTemplateId !== undefined) selectedIterateTemplateId.value = data.selectedIterateTemplateId
         if (data.mainSplitLeftPct !== undefined) mainSplitLeftPct.value = data.mainSplitLeftPct
-        if (data.testColumnCount !== undefined) testColumnCount.value = data.testColumnCount
-        if (data.variants) variants.value = data.variants
-        if (data.variantResults) variantResults.value = data.variantResults
+        // 逐列归一化 variants：部分/旧格式快照（如 {}）不能直接覆盖，
+        // 否则模板里 session.variants['a'].modelKey 会因 undefined 崩掉整个工作区。
+        // 逐列克隆，避免残留列与模块级 DEFAULT_VARIANTS 共享引用被 v-model 污染。
+        if (data.variants && typeof data.variants === 'object' && !Array.isArray(data.variants)) {
+          const restored = {} as Record<VideoTestVariantId, VideoTestVariantConfig>
+          for (const id of ['a', 'b', 'c', 'd'] as VideoTestVariantId[]) {
+            const v = (data.variants as Record<string, unknown>)[id]
+            if (v && typeof v === 'object') {
+              const r = v as Record<string, unknown>
+              const version = r['version']
+              restored[id] = {
+                id,
+                version:
+                  version === 'workspace' || version === 'previous' || typeof version === 'number'
+                    ? version
+                    : DEFAULT_VARIANTS[id].version,
+                modelKey: typeof r['modelKey'] === 'string' ? r['modelKey'] : '',
+                duration: typeof r['duration'] === 'number' ? r['duration'] : DEFAULT_VARIANTS[id].duration,
+                aspectRatio: typeof r['aspectRatio'] === 'string' ? r['aspectRatio'] : DEFAULT_VARIANTS[id].aspectRatio,
+                ...(typeof r['motionStrength'] === 'number' ? { motionStrength: r['motionStrength'] as number } : {}),
+              }
+            } else {
+              restored[id] = { ...DEFAULT_VARIANTS[id] }
+            }
+          }
+          variants.value = restored
+        }
+        if (data.variantResults && typeof data.variantResults === 'object') {
+          variantResults.value = { a: null, b: null, c: null, d: null, ...data.variantResults }
+        }
         if (data.origin) origin.value = data.origin
         if (data.assetBinding) assetBinding.value = data.assetBinding
+        // 列数只接受合法枚举，避免垃圾值破坏网格与单选组
+        if ([2, 3, 4].includes(data.testColumnCount)) testColumnCount.value = data.testColumnCount
         lastActiveAt.value = data.lastActiveAt || Date.now()
       }
     } catch {}
@@ -321,6 +353,23 @@ export const useVideoImage2VideoSession = defineStore('session-video-image2video
 
   const updateTextModel = (key: string) => {
     selectedTextModelKey.value = key || ''
+    void saveSession()
+  }
+
+  // 收藏/历史外部应用所需的写入口（与图像模式 session 对齐）
+  const updatePrompt = (prompt: string) => {
+    originalPrompt.value = prompt || ''
+    void saveSession()
+  }
+
+  const updateAssetBinding = (binding: PromptAssetBinding | undefined, originValue?: PromptSessionOrigin) => {
+    assetBinding.value = binding || { assetId: '' }
+    if (originValue) origin.value = originValue
+    void saveSession()
+  }
+
+  const clearAssetBinding = () => {
+    assetBinding.value = { assetId: '' }
     void saveSession()
   }
 
@@ -363,6 +412,9 @@ export const useVideoImage2VideoSession = defineStore('session-video-image2video
     selectedTemplateId,
     selectedIterateTemplateId,
     updateTextModel,
+    updatePrompt,
+    updateAssetBinding,
+    clearAssetBinding,
     updateTemplate,
     updateIterateTemplate,
     updateOptimizedResult,

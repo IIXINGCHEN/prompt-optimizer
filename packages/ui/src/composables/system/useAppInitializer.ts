@@ -247,8 +247,15 @@ export function useAppInitializer(): {
         }
 
         // 视频相关（Electron）
+        // 桌面端主进程尚无 video IPC 通道，与 videoStorageService/imageStorageService 一致，
+        // 在渲染进程以本地 IndexedDB 存储提供器构造视频模型管理器与服务，保证视频工作区可用
         videoAdapterRegistryInstance = createVideoAdapterRegistry();
         videoStorageService = createVideoStorageService();
+        {
+          const videoStorageProvider = StorageFactory.create('dexie');
+          videoModelManager = createVideoModelManager(videoStorageProvider, videoAdapterRegistryInstance);
+          videoService = createVideoService(videoModelManager, videoAdapterRegistryInstance);
+        }
 
         services.value = {
           modelManager,

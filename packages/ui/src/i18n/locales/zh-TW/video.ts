@@ -5,6 +5,8 @@ const messages = {
   },
   "videoWorkspace": {
     "input": {
+      "template": "優化範本",
+      "templatePlaceholder": "請選擇圖生影片優化範本",
       "originalPrompt": "動態意圖與提示詞",
       "originalPromptPlaceholder": "請輸入對影片運鏡、主體動作、時序節奏的動態描述",
       "firstFrameImage": "首幀輸入影像",

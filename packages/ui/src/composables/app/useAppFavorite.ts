@@ -153,6 +153,7 @@ export interface AppFavoriteOptions {
     imageText2ImageSession?: TemporaryVariablesSessionApi
     imageImage2ImageSession?: Image2ImageExampleSessionApi
     imageMultiImageSession?: MultiImageExampleSessionApi
+    videoImage2VideoSession?: AssetBindingSessionApi
     optimizerCurrentVersions?: Ref<PromptRecordChain['versions']>
     getFavoriteImageStorageService?: () => IImageStorageService | null
     getFavoriteManager?: () => IFavoriteManager | null
@@ -324,6 +325,7 @@ export function useAppFavorite(options: AppFavoriteOptions): AppFavoriteReturn {
         imageText2ImageSession,
         imageImage2ImageSession,
         imageMultiImageSession,
+        videoImage2VideoSession,
         optimizerCurrentVersions,
         getFavoriteImageStorageService,
         getFavoriteManager,
@@ -497,6 +499,8 @@ export function useAppFavorite(options: AppFavoriteOptions): AppFavoriteReturn {
                 return basicSystemSession || null
             case 'basic-user':
                 return basicUserSession || null
+            case 'video-image2video':
+                return videoImage2VideoSession || null
             default:
                 return getTemporaryVariablesSession(targetKey)
         }
@@ -615,6 +619,7 @@ export function useAppFavorite(options: AppFavoriteOptions): AppFavoriteReturn {
         imageText2ImageSession,
         imageImage2ImageSession,
         imageMultiImageSession,
+        videoImage2VideoSession,
         optimizerCurrentVersions,
     })
 
@@ -799,6 +804,29 @@ export function useAppFavorite(options: AppFavoriteOptions): AppFavoriteReturn {
             applyFavoriteVariables(draft)
             await applyFavoriteExample(draft)
             applyFavoriteSessionBinding(favorite, draft, resolvedTargetKey)
+        } else if (favoriteMode?.functionMode === 'video' && targetKey === 'video-image2video') {
+            // 视频模式：导航到图生视频工作区后回填动态意图提示词
+            const didNavigate = await navigateToSubModeKey('video-image2video')
+            if (didNavigate === false) return false
+
+            await nextTick()
+
+            clearFavoriteWorkspaceBeforeApply(targetKey)
+
+            if (typeof window !== 'undefined') {
+                window.dispatchEvent(
+                    new CustomEvent('video-workspace-restore-favorite', {
+                        detail: {
+                            content: draft.content,
+                            metadata: draft.metadata,
+                        },
+                    }),
+                )
+            }
+
+            applyFavoriteVariables(draft)
+            await applyFavoriteExample(draft)
+            applyFavoriteSessionBinding(favorite, draft, targetKey)
         } else {
             // 其他情况：直接设置内容，不切换模式
             clearFavoriteWorkspaceBeforeApply(targetKey)

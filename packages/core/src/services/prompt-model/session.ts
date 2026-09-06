@@ -134,6 +134,8 @@ export const legacySessionSubModeKeyToPromptModeKey = (
       return 'image-image2image';
     case 'image-multiimage':
       return 'image-multiimage';
+    case 'video-image2video':
+      return 'video-image2video';
     case 'basic-system':
     default:
       return 'basic-system';

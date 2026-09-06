@@ -105,6 +105,8 @@ const messages = {
       "prompt_empty": "影片提示詞不能為空",
       "config_id_empty": "影片模型設定ID不能為空",
       "config_not_found": "未找到影片模型設定",
+      "config_already_exists": "影片模型設定已存在: {configId}",
+      "config_invalid": "影片模型設定無效: {configId}",
       "config_not_enabled": "影片模型設定未啟用: {configName}，請先在模型管理中設定 API Key 並啟用此模型",
       "provider_not_found": "未找到影片提供商: {providerId}",
       "input_image_required": "圖生影片需要提供首幀影像",

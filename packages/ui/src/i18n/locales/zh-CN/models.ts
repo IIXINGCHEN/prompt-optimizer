@@ -1,5 +1,6 @@
 const messages = {
   "modelManager": {
+    "modelDisabled": "模型「{name}」未启用，请先在模型管理中启用后再使用",
     "title": "模型管理",
     "textModels": "文本模型",
     "imageModels": "图像模型",

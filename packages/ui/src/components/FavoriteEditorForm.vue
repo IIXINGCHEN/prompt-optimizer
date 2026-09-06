@@ -514,9 +514,10 @@ const formData = reactive({
   content: '',
   category: '',
   tags: [] as string[],
-  functionMode: 'basic' as 'basic' | 'context' | 'image',
+  functionMode: 'basic' as 'basic' | 'context' | 'image' | 'video',
   optimizationMode: 'system' as 'system' | 'user' | undefined,
   imageSubMode: undefined as 'text2image' | 'image2image' | 'multiimage' | undefined,
+  videoSubMode: undefined as 'image2video' | undefined,
 })
 
 const mediaDraft = reactive({
@@ -1219,6 +1220,7 @@ const handleSave = async () => {
       functionMode: formData.functionMode,
       optimizationMode: formData.optimizationMode,
       imageSubMode: formData.imageSubMode,
+      videoSubMode: formData.videoSubMode,
     }
 
     let existingMetadata =
@@ -1355,6 +1357,9 @@ watch(() => [
     formData.imageSubMode = shouldApplyIncomingContent && prefill?.imageSubMode
       ? prefill.imageSubMode
       : props.favorite.imageSubMode
+    formData.videoSubMode = shouldApplyIncomingContent && prefill?.videoSubMode
+      ? prefill.videoSubMode
+      : props.favorite.videoSubMode
     await hydrateMediaDraft(undefined, props.favorite, isStale)
     if (isStale()) return
     const draft = props.applyIncomingContentOnEdit ? props.prefill?.reproducibilityDraft : undefined
@@ -1409,6 +1414,11 @@ watch(() => [
     formData.functionMode = prefillFunctionMode
     formData.optimizationMode = prefill?.optimizationMode === 'user' ? 'user' : 'system'
     formData.imageSubMode = undefined
+  } else if (prefillFunctionMode === 'video' || props.currentFunctionMode === 'video') {
+    formData.functionMode = 'video'
+    formData.videoSubMode = 'image2video'
+    formData.imageSubMode = undefined
+    formData.optimizationMode = undefined
   } else if (props.currentFunctionMode === 'image') {
     formData.functionMode = 'image'
     formData.imageSubMode = 'text2image'

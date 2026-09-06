@@ -1,5 +1,6 @@
 const messages = {
   "modelManager": {
+    "modelDisabled": "Model [{name}] is disabled. Enable it in Model Manager first.",
     "title": "Model Manager",
     "textModels": "Text Models",
     "imageModels": "Image Models",

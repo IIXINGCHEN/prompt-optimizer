@@ -178,4 +178,86 @@ describe('useVideoImage2VideoSession persistence', () => {
     const parsed = JSON.parse(lastCall)
     expect(parsed.inputImageId).toBeNull()
   })
+
+  it('normalizes partial/legacy variants snapshot to full a-d shape on restore', async () => {
+    const { pinia } = createTestPinia({
+      preferenceService: {
+        get: async <T,>(key: string, defaultValue: T) => {
+          if (key === VIDEO_IMAGE2VIDEO_SESSION_KEY) {
+            // 旧格式/损坏快照：variants 为空对象 + 非法列数
+            return JSON.stringify({ originalPrompt: 'legacy', variants: {}, testColumnCount: 7 }) as any
+          }
+          return defaultValue
+        },
+        set: vi.fn(),
+      } as any,
+    })
+
+    const store = useVideoImage2VideoSession(pinia)
+    await store.restoreSession()
+
+    // 归一化后必须具备完整 a-d 列，工作区模板才不会因 undefined 崩溃
+    for (const id of ['a', 'b', 'c', 'd'] as const) {
+      expect(store.variants[id]).toBeDefined()
+      expect(store.variants[id].id).toBe(id)
+      expect(typeof store.variants[id].modelKey).toBe('string')
+    }
+    expect(store.testColumnCount).toBe(2)
+    expect(store.originalPrompt).toBe('legacy')
+  })
+
+  it('saves and restores endImage roundtrip via image storage service', async () => {
+    const savedImages = new Map<string, any>()
+    const saveImage = vi.fn(async (data: any) => {
+      savedImages.set(data.metadata.id, data)
+      return data.metadata.id
+    })
+    const set = vi.fn(async (_key: string, _value: any) => {})
+    const { pinia } = createTestPinia({
+      preferenceService: {
+        get: async <T,>(_key: string, defaultValue: T) => defaultValue,
+        set,
+      } as any,
+      imageStorageService: {
+        saveImage,
+        getMetadata: vi.fn(async (id: string) => savedImages.get(id)?.metadata || null),
+        getImage: vi.fn(async (id: string) => savedImages.get(id) || null),
+        listAllMetadata: vi.fn(async () => []),
+        deleteImages: vi.fn(async () => {}),
+      } as any,
+    })
+
+    const store = useVideoImage2VideoSession(pinia)
+    store.endImageB64 = 'data:image/png;base64,ENDDATA'
+    store.endImageMime = 'image/png'
+    await store.saveSession()
+
+    const raw = set.mock.calls.at(-1)?.[1]
+    const parsed = JSON.parse(raw)
+    expect(parsed.endImageId).toBeTruthy()
+    expect(parsed.endImageB64).toBeUndefined()
+
+    // 模拟重开应用：从持久化快照恢复
+    const snapshot = raw
+    const get = vi.fn(async (key: string, defaultValue: unknown) =>
+      key === VIDEO_IMAGE2VIDEO_SESSION_KEY ? snapshot : defaultValue
+    )
+    const { pinia: pinia2 } = createTestPinia({
+      preferenceService: {
+        get: get as any,
+        set: vi.fn(),
+      } as any,
+      imageStorageService: {
+        saveImage: vi.fn(),
+        getMetadata: vi.fn(async (id: string) => savedImages.get(id)?.metadata || null),
+        getImage: vi.fn(async (id: string) => savedImages.get(id) || null),
+        listAllMetadata: vi.fn(async () => []),
+        deleteImages: vi.fn(async () => {}),
+      } as any,
+    })
+    const store2 = useVideoImage2VideoSession(pinia2)
+    await store2.restoreSession()
+    expect(store2.endImageId).toBe(parsed.endImageId)
+    expect(store2.endImageB64).toBe('data:image/png;base64,ENDDATA')
+  })
 })

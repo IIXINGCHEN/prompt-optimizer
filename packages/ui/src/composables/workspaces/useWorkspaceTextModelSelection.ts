@@ -10,7 +10,7 @@
  * @param services - AppServices 实例
  * @param sessionStore - Session store 实例（ImageText2ImageSession / ImageImage2ImageSession）
  */
-import { computed, ref, watch, type Ref } from 'vue'
+import { computed, onScopeDispose, ref, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AppServices } from '../../types/services'
 import type { ModelSelectOption } from '../../types/select-options'
@@ -93,6 +93,14 @@ export function useWorkspaceTextModelSelection<T extends WorkspaceTextModelSessi
     window.addEventListener('pro-workspace-refresh-text-models', handleRefresh)
     window.addEventListener('image-workspace-refresh-text-models', handleRefresh)
     window.addEventListener('video-workspace-refresh-text-models', handleRefresh)
+    // 组合式函数随组件实例挂载，必须随作用域销毁移除全局监听，
+    // 否则每次切换工作区都会累积监听器与闭包（内存泄漏 + 重复刷新）
+    onScopeDispose(() => {
+      window.removeEventListener('basic-workspace-refresh-text-models', handleRefresh)
+      window.removeEventListener('pro-workspace-refresh-text-models', handleRefresh)
+      window.removeEventListener('image-workspace-refresh-text-models', handleRefresh)
+      window.removeEventListener('video-workspace-refresh-text-models', handleRefresh)
+    })
   }
 
   return {

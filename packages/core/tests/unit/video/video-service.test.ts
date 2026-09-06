@@ -32,7 +32,7 @@ describe('VideoService & VideoModelManager', () => {
 
     const wanConfig = configs.find((c) => c.providerId === 'dashscope')
     expect(wanConfig).toBeDefined()
-    expect(wanConfig?.modelId).toBe('wan2.1-i2v-plus')
+    expect(wanConfig?.modelId).toBe('wanx2.1-i2v-plus')
     expect(wanConfig?.model.capabilities.image2video).toBe(true)
 
     const sfConfig = configs.find((c) => c.providerId === 'siliconflow')

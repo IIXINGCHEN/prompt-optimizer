@@ -13,9 +13,6 @@ import { VideoError } from '../errors'
 import { VIDEO_ERROR_CODES } from '../../../constants/error-codes'
 
 export abstract class AbstractVideoProviderAdapter implements IVideoProviderAdapter {
-  protected static readonly TEST_IMAGE_BASE64 =
-    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAOxAAADsQBlSsOGwAABGVJREFUeJztm01oXFUUx3/vzZtJMmnapPWjraZN/SCNrS200KKgIGhBXYhQcOHChYJbwY3gQnDhwoWgi4ILQRFciCCCC1sQwYKLii1YC1ppbWsb29Sm+Zg0mWTevHfvcefOm8nMm5lk3ryZvPwgvHvfO+fcO//cc8+79wZCQkJCQkJCQrZJAC5wC3gd+B54HfgCuO7ad4C/KsuLtR3E6gFvAH1AAiwDPwBLwBzwmXveaH4H8ASwF7yfawNYBL4Cfq7VPrMF3AVcB/qATdJ6x8CXwNEa+x6qY8BDwG/AADAKzAJZYMLN7zMfnCYA4G3gJDAJzAO9wPfAEPCKG7vE6sYAfAK8BOwDFoC7gVHgWWARsL0VX6wGYANYBnYCu4BjQMIVKyfdcxH4FrgJfOiOHnAM+BWwgZNAGhjw4rZZM4BF4BzwJ3DCjUWkqaXABeAi8CKQAl4DFoATwB1uxd8wCxQZ0XPBYuAJoO3DfOOZjhvAOeB5V6SdABYZWKkNwAbwDLAKnDZP7Qa+Av4Gzo/xH7IbuOJe+yTwByvBr+3VwxrrQKvkL+Bf4LE2VsU8cBGYIIKfuxRFJiYJAL9nE8zf/M2zW/Ll7zqgBBxoY1XMAmNE8HOXothNJiYJAL9hE9wdGF4IcVlmNPqfk4QsXFkCQu3fBrAjQNVsChFJ6CeS4CaZJqAnQNVsChFZeECCm0y9N0AAGElwk1lTSewNUDWbQkQS3GQaeIsAngBUsyn0E0lwk1lN6NeB3jZWxZOElIQHUC8J/UQS3GRqQh8E2hnfVBL7Atb9phGRhAckuMnUhD4A/N3GqlCShJ5NMMGJJLjJ1AT3AXOEVJS7Qcrb2zhGJMFNpiZ0P/APcG+AqtkUIpLgJlMT2gfs3SaP5N8EEnwP8Kf7gGFgO8x0xyUhK+Dre4K6o82g0o4h2zDTbVpHyMrLanxT9AV9a9VpQWgJV1HKBq4CqeKG6KbL9bbN3OVqw7q1W8gMlLOHh40TzE0hKwqjbO6qFJO5sn+OE9u0JnQGJiXJ1mKdR/gSF5Z9E0ywFaHbXGDEg4j8WjSC7hJyIcmP0SjMCWElwW0MEUH0s4k4zWuIyGKFmGDl5aBGdI/9/8mABDeZmtB7gV4iekKT2BNwD7DfYx4+W5JZd1fI0xDKq+qJakTi0xRzMKTGsR7eI+J9gptMTWg/+Ku6tSXhEt7hCTfgJXjX6wa8hBfwxVPgaLW8hNeUbDK7hVxuLcLVF0zSh3R+Q/hsKIr2+zZLT8jnJOQ7wn5H2O8I+x1hvyPsd4T9jrDfEfY7wn5H2O8I+x1hvyPsd4T9jrDfEfY7wn5H2O8I+x1hfZKwvyVd10ukBOvMNeAj4B9gAnh3+wfbEy9TZx+c7R+Ay3Q2v1ek3gJOufblO7/YnphrCfn8Yr0F7HOfgG35j5tOpK4+GWfA6y4y5ePa8t0v4wyY8pq/Am9tQ10hISEhISEhIaFo/gOE5C7Cek1g0wAAAABJRU5ErkJggg=='
-
   public abstract getProvider(): VideoProvider
   public abstract getModels(): VideoModel[]
 
@@ -49,12 +46,14 @@ export abstract class AbstractVideoProviderAdapter implements IVideoProviderAdap
 
   public abstract submitTask(
     request: Image2VideoRequest,
-    config: VideoModelConfig
+    config: VideoModelConfig,
+    signal?: AbortSignal
   ): Promise<{ taskId: string }>
 
   public abstract queryTask(
     taskId: string,
-    config: VideoModelConfig
+    config: VideoModelConfig,
+    signal?: AbortSignal
   ): Promise<VideoTask>
 
   public async cancelTask?(
@@ -81,7 +80,7 @@ export abstract class AbstractVideoProviderAdapter implements IVideoProviderAdap
 
     // 1. 提交异步任务
     handlers?.onStatusChange?.('pending', 0)
-    const { taskId } = await this.submitTask(request, config)
+    const { taskId } = await this.submitTask(request, config, signal)
 
     handlers?.onStatusChange?.('queued', 5)
 
@@ -89,15 +88,14 @@ export abstract class AbstractVideoProviderAdapter implements IVideoProviderAdap
     const timeoutMs = options.pollingTimeoutMs ?? 600_000 // 10 分钟超时
 
     let pollIntervalMs = 2_000
+    let consecutiveQueryErrors = 0
 
     while (true) {
       if (signal?.aborted) {
-        if (typeof this.cancelTask === 'function') {
-          try {
-            await this.cancelTask(taskId, config)
-          } catch (e) {
-            console.warn('[VideoAdapter] Failed to notify remote cancellation:', e)
-          }
+        try {
+          await this.cancelTask?.(taskId, config)
+        } catch (e) {
+          console.warn('[VideoAdapter] Failed to notify remote cancellation:', e)
         }
         throw new VideoError(VIDEO_ERROR_CODES.TASK_CANCELLED, 'Task cancelled by user')
       }
@@ -113,11 +111,19 @@ export abstract class AbstractVideoProviderAdapter implements IVideoProviderAdap
       // 2. 查询任务状态
       let task: VideoTask
       try {
-        task = await this.queryTask(taskId, config)
+        task = await this.queryTask(taskId, config, signal)
+        consecutiveQueryErrors = 0
       } catch (err) {
-        // 网络短暂错误时允许重试，不立即崩溃
+        // 网络短暂错误时允许重试；连续多次失败或永久性错误（如鉴权失效）立即上抛，
+        // 避免以固定间隔空转 10 分钟并掩盖真实根因。
+        consecutiveQueryErrors++
+        const isPermanent = err instanceof VideoError && err.code === VIDEO_ERROR_CODES.TASK_POLLING_FAILED
+        if (isPermanent || consecutiveQueryErrors >= 5) {
+          throw err
+        }
         const message = err instanceof Error ? err.message : String(err)
-        console.warn(`[VideoAdapter] Task ${taskId} query error, will retry:`, message)
+        console.warn(`[VideoAdapter] Task ${taskId} query error (${consecutiveQueryErrors}/5), will retry:`, message)
+        pollIntervalMs = Math.min(pollIntervalMs * 2, 10_000)
         continue
       }
 
@@ -155,15 +161,15 @@ export abstract class AbstractVideoProviderAdapter implements IVideoProviderAdap
 
   protected async sleep(ms: number, signal?: AbortSignal): Promise<void> {
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(resolve, ms)
-      if (signal) {
-        const onAbort = () => {
-          clearTimeout(timer)
-          signal.removeEventListener('abort', onAbort)
-          reject(new VideoError(VIDEO_ERROR_CODES.TASK_CANCELLED, 'Task cancelled by user'))
-        }
-        signal.addEventListener('abort', onAbort)
+      const onAbort = () => {
+        clearTimeout(timer)
+        reject(new VideoError(VIDEO_ERROR_CODES.TASK_CANCELLED, 'Task cancelled by user'))
       }
+      const timer = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort)
+        resolve()
+      }, ms)
+      signal?.addEventListener('abort', onAbort)
     })
   }
 

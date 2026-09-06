@@ -6,6 +6,7 @@ import {
   IMAGE_IMAGE2IMAGE_SESSION_KEY,
   IMAGE_MULTIIMAGE_SESSION_KEY,
   IMAGE_TEXT2IMAGE_SESSION_KEY,
+  VIDEO_IMAGE2VIDEO_SESSION_KEY,
   scheduleImageStorageGc,
 } from '../../../../src/stores/session/imageStorageMaintenance'
 
@@ -182,8 +183,37 @@ describe('imageStorageMaintenance GC', () => {
     expect(imageStorageService.deleteImages).toHaveBeenCalledWith(['img-orphan-multi'])
   })
 
-  it('keeps the Basic/System test image asset referenced by its session snapshot', async () => {
+  it('keeps video image2video input/end images referenced by its session snapshot', async () => {
     const preferenceService = {
+      get: vi.fn(async (key: string, defaultValue: unknown) => {
+        if (key === VIDEO_IMAGE2VIDEO_SESSION_KEY) {
+          return JSON.stringify({
+            inputImageId: 'img-video-input',
+            endImageId: 'img-video-end',
+          })
+        }
+
+        return defaultValue
+      }),
+    }
+
+    const imageStorageService = {
+      listAllMetadata: vi.fn(async () => [
+        { id: 'img-video-input' },
+        { id: 'img-video-end' },
+        { id: 'img-orphan-video' },
+      ]),
+      deleteImages: vi.fn(async (_ids: string[]) => {}),
+    }
+
+    scheduleImageStorageGc(preferenceService as any, imageStorageService as any, { delayMs: 0 })
+    await flushScheduledGc()
+
+    expect(imageStorageService.deleteImages).toHaveBeenCalledTimes(1)
+    expect(imageStorageService.deleteImages).toHaveBeenCalledWith(['img-orphan-video'])
+  })
+
+  it('keeps the Basic/System test image asset referenced by its session snapshot', async () => {    const preferenceService = {
       get: vi.fn(async (key: string, defaultValue: unknown) => {
         if (key === BASIC_SYSTEM_SESSION_KEY) {
           return JSON.stringify({

@@ -472,9 +472,10 @@ const imageSubModeApi = useImageSubMode(services);
 //
 const getWorkspacePathFromGlobalSettings = () => {
   const globalSettings = useGlobalSettings()
-  const { functionMode, basicSubMode, proSubMode, imageSubMode } = globalSettings.state
+  const { functionMode, basicSubMode, proSubMode, imageSubMode, videoSubMode } = globalSettings.state
   if (functionMode === 'image') return normalizeWorkspacePath(`/image/${imageSubMode}`)
   if (functionMode === 'pro') return normalizeWorkspacePath(`/pro/${proSubMode}`)
+  if (functionMode === 'video') return normalizeWorkspacePath(`/video/${videoSubMode || 'image2video'}`)
   return normalizeWorkspacePath(`/basic/${basicSubMode}`)
 }
 
@@ -1649,6 +1650,7 @@ const getSessionBySubModeKey = (targetKey: SubModeKey) => {
         case 'image-text2image': return imageText2ImageSession;
         case 'image-image2image': return imageImage2ImageSession;
         case 'image-multiimage': return imageMultiImageSession;
+        case 'video-image2video': return videoImage2VideoSession;
         default: return null;
     }
 };
@@ -1710,6 +1712,7 @@ const {
     imageText2ImageSession,
     imageImage2ImageSession,
     imageMultiImageSession,
+    videoImage2VideoSession,
     optimizerCurrentVersions,
     getFavoriteImageStorageService:
       () => services.value?.favoriteImageStorageService || services.value?.imageStorageService || null,

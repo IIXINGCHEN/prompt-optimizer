@@ -295,6 +295,7 @@ export class FavoriteManager implements IFavoriteManager {
       functionMode: favorite.functionMode,
       optimizationMode: favorite.optimizationMode,
       imageSubMode: favorite.imageSubMode,
+      videoSubMode: favorite.videoSubMode,
       metadata: favorite.metadata
     };
 

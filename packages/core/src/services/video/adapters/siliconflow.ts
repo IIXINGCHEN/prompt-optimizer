@@ -79,7 +79,8 @@ export class SiliconFlowVideoAdapter extends AbstractVideoProviderAdapter {
 
   public async submitTask(
     request: Image2VideoRequest,
-    config: VideoModelConfig
+    config: VideoModelConfig,
+    signal?: AbortSignal
   ): Promise<{ taskId: string }> {
     const apiKey = config.connectionConfig?.apiKey?.trim()
     if (!apiKey) {
@@ -89,12 +90,16 @@ export class SiliconFlowVideoAdapter extends AbstractVideoProviderAdapter {
     const endpoint = this.resolveEndpointUrl(config, '/video/submit')
     const imgData = this.resolveInputImage(request.inputImage)
 
+    // 防止 paramOverrides 覆盖保留字段（model/prompt/image 决定任务的真实目标模型与输入）
+    const { model: _m, prompt: _p, image: _i, ...safeConfigOverrides } = (config.paramOverrides || {}) as Record<string, any>
+    const { model: _m2, prompt: _p2, image: _i2, ...safeRequestOverrides } = (request.paramOverrides || {}) as Record<string, any>
+
     const payload: Record<string, any> = {
       model: config.modelId,
       prompt: request.prompt,
       image: imgData,
-      ...config.paramOverrides,
-      ...request.paramOverrides,
+      ...safeConfigOverrides,
+      ...safeRequestOverrides,
     }
 
     if (request.seed !== undefined) {
@@ -108,6 +113,7 @@ export class SiliconFlowVideoAdapter extends AbstractVideoProviderAdapter {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload),
+      signal,
     })
 
     if (!res.ok) {
@@ -132,7 +138,8 @@ export class SiliconFlowVideoAdapter extends AbstractVideoProviderAdapter {
 
   public async queryTask(
     taskId: string,
-    config: VideoModelConfig
+    config: VideoModelConfig,
+    signal?: AbortSignal
   ): Promise<VideoTask> {
     const apiKey = config.connectionConfig?.apiKey?.trim()
     if (!apiKey) {
@@ -147,10 +154,16 @@ export class SiliconFlowVideoAdapter extends AbstractVideoProviderAdapter {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ requestId: taskId }),
+      signal,
     })
 
     if (!res.ok) {
       const errText = await res.text()
+      // 4xx（除 408/429）视为永久性错误立即上抛；408/429/5xx 交给轮询引擎退避重试
+      const retryable = res.status === 408 || res.status === 429 || res.status >= 500
+      if (retryable) {
+        throw new Error(`SiliconFlow query task transient error (${res.status}): ${errText}`)
+      }
       throw new VideoError(
         VIDEO_ERROR_CODES.TASK_POLLING_FAILED,
         `SiliconFlow query task error (${res.status}): ${errText}`
@@ -166,10 +179,12 @@ export class SiliconFlowVideoAdapter extends AbstractVideoProviderAdapter {
     switch (rawStatus) {
       case 'queued':
       case 'pending':
+      case 'inqueue':
         status = 'queued'
         progressPercent = 10
         break
       case 'processing':
+      case 'inprogress':
         status = 'processing'
         progressPercent = 50
         break

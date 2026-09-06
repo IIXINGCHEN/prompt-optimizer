@@ -66,10 +66,11 @@ export class VideoStorageService implements IVideoStorageService {
       source: data.metadata.source,
     }
 
+    // blob 与 dataUrl 二选一持久化，避免同一视频双份存储导致配额核算失真
     const dataRecord: DataRecord = {
       id: data.metadata.id,
-      blob: data.blob,
-      dataUrl: data.dataUrl,
+      blob: data.blob ?? undefined,
+      dataUrl: data.blob ? undefined : data.dataUrl,
     }
 
     await this.db.transaction('rw', this.db.videoMetadata, this.db.videoData, async () => {
@@ -82,6 +83,15 @@ export class VideoStorageService implements IVideoStorageService {
     return data.metadata.id
   }
 
+  private parseMetadata(raw: string): VideoMetadata | null {
+    try {
+      return JSON.parse(raw) as VideoMetadata
+    } catch (e) {
+      console.warn('[VideoStorage] Corrupted metadata record skipped:', e)
+      return null
+    }
+  }
+
   async getVideo(id: string): Promise<FullVideoData | null> {
     const [metadataRecord, dataRecord] = await Promise.all([
       this.db.videoMetadata.get(id),
@@ -92,10 +102,17 @@ export class VideoStorageService implements IVideoStorageService {
       return null
     }
 
+    const metadata = this.parseMetadata(metadataRecord.metadata)
+    if (!metadata) {
+      // 记录损坏：清掉以免永久占用配额
+      await this.deleteVideos([id])
+      return null
+    }
+
     await this.db.videoMetadata.update(id, { accessedAt: Date.now() })
 
     return {
-      metadata: JSON.parse(metadataRecord.metadata) as VideoMetadata,
+      metadata,
       blob: dataRecord?.blob,
       dataUrl: dataRecord?.dataUrl,
     }
@@ -104,7 +121,7 @@ export class VideoStorageService implements IVideoStorageService {
   async getMetadata(id: string): Promise<VideoMetadata | null> {
     const record = await this.db.videoMetadata.get(id)
     if (!record) return null
-    return JSON.parse(record.metadata) as VideoMetadata
+    return this.parseMetadata(record.metadata)
   }
 
   async deleteVideo(id: string): Promise<void> {
@@ -164,7 +181,12 @@ export class VideoStorageService implements IVideoStorageService {
 
   async listAllMetadata(): Promise<VideoMetadata[]> {
     const records = await this.db.videoMetadata.toArray()
-    return records.map((r) => JSON.parse(r.metadata) as VideoMetadata)
+    const result: VideoMetadata[] = []
+    for (const r of records) {
+      const parsed = this.parseMetadata(r.metadata)
+      if (parsed) result.push(parsed)
+    }
+    return result
   }
 
   async getStorageStats(): Promise<{

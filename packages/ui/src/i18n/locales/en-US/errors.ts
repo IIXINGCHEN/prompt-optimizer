@@ -105,6 +105,8 @@ const messages = {
       "prompt_empty": "Video prompt cannot be empty",
       "config_id_empty": "Video model config ID cannot be empty",
       "config_not_found": "Video model config not found",
+      "config_already_exists": "Video model config already exists: {configId}",
+      "config_invalid": "Video model config is invalid: {configId}",
       "config_not_enabled": "Video model config is not enabled: {configName}. Please configure an API Key in Model Manager and enable it.",
       "provider_not_found": "Video provider not found: {providerId}",
       "input_image_required": "Image-to-Video requires an initial frame image",

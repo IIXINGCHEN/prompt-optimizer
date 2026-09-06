@@ -94,7 +94,7 @@ export class VideoModelManager implements IVideoModelManager {
         const data = current || {}
         if (data[completeConfig.id]) {
           throw new VideoModelManagerError(
-            VIDEO_ERROR_CODES.CONFIG_NOT_FOUND,
+            VIDEO_ERROR_CODES.CONFIG_ALREADY_EXISTS,
             `Config already exists: ${completeConfig.id}`,
             { configId: completeConfig.id }
           )
@@ -120,6 +120,12 @@ export class VideoModelManager implements IVideoModelManager {
         const updated: VideoModelConfig = {
           ...data[id],
           ...updates,
+          // 逐字段合并 connectionConfig，避免局部更新（如仅改 enabled 或仅换 apiKey）时
+          // 丢掉已保存的 baseURL 等其余连接字段
+          connectionConfig: {
+            ...data[id].connectionConfig,
+            ...updates.connectionConfig,
+          },
           id: data[id].id,
         }
 
@@ -145,9 +151,19 @@ export class VideoModelManager implements IVideoModelManager {
     )
   }
 
+  private parseConfigs(raw: string | null): Record<string, VideoModelConfig> {
+    if (!raw) return {}
+    try {
+      return JSON.parse(raw) || {}
+    } catch (e) {
+      console.warn('[VideoModelManager] Corrupted config storage; falling back to empty map:', e)
+      return {}
+    }
+  }
+
   async getConfig(id: string): Promise<VideoModelConfig | null> {
     const raw = await this.storage.getItem(this.storageKey)
-    const data: Record<string, VideoModelConfig> = raw ? JSON.parse(raw) : {}
+    const data = this.parseConfigs(raw)
     const cfg = data[id]
     if (!cfg) return null
 
@@ -164,7 +180,7 @@ export class VideoModelManager implements IVideoModelManager {
 
   async getAllConfigs(): Promise<VideoModelConfig[]> {
     const raw = await this.storage.getItem(this.storageKey)
-    const data: Record<string, VideoModelConfig> = raw ? JSON.parse(raw) : {}
+    const data = this.parseConfigs(raw)
 
     return Object.entries(data).map(([key, cfg]) => {
       const withId = (cfg as any).id ? cfg : { ...cfg, id: key }
@@ -241,13 +257,13 @@ export class VideoModelManager implements IVideoModelManager {
       throw new VideoModelManagerError(VIDEO_ERROR_CODES.CONFIG_ID_EMPTY, 'Config ID cannot be empty')
     }
     if (!config.name?.trim()) {
-      throw new VideoModelManagerError(VIDEO_ERROR_CODES.CONFIG_NOT_FOUND, 'Config name cannot be empty')
+      throw new VideoModelManagerError(VIDEO_ERROR_CODES.CONFIG_INVALID, 'Config name cannot be empty', { configId: config.id })
     }
     if (!config.providerId?.trim()) {
       throw new VideoModelManagerError(VIDEO_ERROR_CODES.PROVIDER_NOT_FOUND, 'Provider ID cannot be empty')
     }
     if (!config.modelId?.trim()) {
-      throw new VideoModelManagerError(VIDEO_ERROR_CODES.CONFIG_NOT_FOUND, 'Model ID cannot be empty')
+      throw new VideoModelManagerError(VIDEO_ERROR_CODES.CONFIG_INVALID, 'Model ID cannot be empty', { configId: config.id })
     }
   }
 
