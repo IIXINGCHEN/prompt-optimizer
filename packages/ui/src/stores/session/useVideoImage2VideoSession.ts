@@ -319,6 +319,11 @@ export const useVideoImage2VideoSession = defineStore('session-video-image2video
     } catch {}
   }
 
+  const updateTextModel = (key: string) => {
+    selectedTextModelKey.value = key || ''
+    void saveSession()
+  }
+
   const updateTemplate = (id: string | null) => {
     selectedTemplateId.value = id || ''
     void saveSession()
@@ -357,6 +362,7 @@ export const useVideoImage2VideoSession = defineStore('session-video-image2video
     selectedTextModelKey,
     selectedTemplateId,
     selectedIterateTemplateId,
+    updateTextModel,
     updateTemplate,
     updateIterateTemplate,
     updateOptimizedResult,

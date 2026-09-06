@@ -87,16 +87,28 @@
               <NGrid :cols="24" :x-gap="8" responsive="screen">
                 <NGridItem :span="8" :xs="24" :sm="8">
                   <NSpace vertical :size="4">
-                    <NText depth="3" style="font-size: 12px;">
-                      {{ t('imageWorkspace.input.textModel') }}
-                    </NText>
+                    <NFlex justify="space-between" align="center">
+                      <NText depth="3" style="font-size: 12px;">
+                        {{ t('imageWorkspace.input.textModel') }}
+                      </NText>
+                      <NButton
+                        v-if="appOpenModelManager"
+                        quaternary
+                        size="tiny"
+                        :title="t('model.select.configure')"
+                        @click="appOpenModelManager('text')"
+                      >
+                        ⚙️
+                      </NButton>
+                    </NFlex>
                     <NSelect
-                      v-model:value="session.selectedTextModelKey"
+                      v-model:value="selectedTextModelKey"
                       :options="textModelOptions"
                       size="small"
                       :disabled="isOptimizing"
                       filterable
                       tag
+                      :placeholder="t('imageWorkspace.input.modelPlaceholder')"
                     />
                   </NSpace>
                 </NGridItem>
@@ -312,7 +324,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, inject, watch, type Ref } from 'vue'
+import { ref, computed, onMounted, onUnmounted, inject, watch, type Ref } from 'vue'
 import {
   NFlex,
   NCard,
@@ -338,6 +350,7 @@ import WorkspaceUtilityMenu from '../common/WorkspaceUtilityMenu.vue'
 import PromptPanelUI from '../PromptPanel.vue'
 import PromptPreviewPanel from '../PromptPreviewPanel.vue'
 import AppVideoPlayer from './AppVideoPlayer.vue'
+import { useWorkspaceTextModelSelection } from '../../composables/workspaces/useWorkspaceTextModelSelection'
 import {
   useVideoImage2VideoSession,
   type VideoTestVariantId,
@@ -347,9 +360,13 @@ import type { VideoModelConfig, PromptRecord, Template } from '@prompt-optimizer
 const { t } = useI18n()
 const toast = useToast()
 const session = useVideoImage2VideoSession()
-const services = inject<Ref<AppServices | null>>('services')
+const services = inject<Ref<AppServices | null>>('services', ref(null))
 const appOpenModelManager = inject<((tab?: string) => void) | null>('openModelManager', null)
 const appOpenTemplateManager = inject<((type?: string) => void) | null>('openTemplateManager', null)
+
+const textModelSelection = useWorkspaceTextModelSelection(services, session)
+const textModelOptions = textModelSelection.textModelOptions
+const selectedTextModelKey = textModelSelection.selectedTextModelKey
 
 const splitRootRef = ref<HTMLDivElement | null>(null)
 const firstFrameInputRef = ref<HTMLInputElement | null>(null)
@@ -391,13 +408,27 @@ const isAnyVariantRunning = computed(() =>
   Object.values(variantRunning.value).some(Boolean)
 )
 
-const textModelOptions = ref<Array<{ label: string; value: string }>>([])
 const videoModelOptions = ref<Array<{ label: string; value: string }>>([])
-const videoTemplateOptions = [
+const videoTemplateOptions = ref<Array<{ label: string; value: string }>>([
   { label: '通用运镜与动态优化', value: 'image2video-general-optimize' },
   { label: '电影级机位与光影时序', value: 'image2video-cinematic-optimize' },
   { label: '人物微表情与动作动态', value: 'image2video-character-motion-optimize' },
-]
+  { label: '商业产品与广告展示动态', value: 'image2video-commercial-product-optimize' },
+  { label: '自然风光与大气流动动态', value: 'image2video-landscape-nature-optimize' },
+])
+
+const refreshVideoTemplates = async () => {
+  if (!services.value?.templateManager) return
+  try {
+    const list = await services.value.templateManager.listTemplatesByType('image2videoOptimize')
+    if (list && list.length > 0) {
+      videoTemplateOptions.value = list.map((t: Template) => ({
+        label: t.name || t.id,
+        value: t.id,
+      }))
+    }
+  } catch {}
+}
 
 const MAX_IMAGE_FILE_SIZE_BYTES = 10 * 1024 * 1024 // 10MB
 
@@ -441,7 +472,31 @@ const handleClearContent = () => {
 }
 
 const handleOptimizePrompt = async () => {
-  if (!session.originalPrompt.trim() || !session.inputImageB64 || !services?.value?.promptService) return
+  if (!session.originalPrompt.trim()) {
+    toast.error(t('videoWorkspace.input.promptRequired'))
+    return
+  }
+  if (!session.inputImageB64) {
+    toast.error(t('videoWorkspace.input.selectFirstFrame'))
+    return
+  }
+  if (!session.selectedTextModelKey) {
+    toast.error(t('toast.error.noOptimizeModel'))
+    appOpenModelManager?.('text')
+    return
+  }
+  if (!services?.value?.promptService) {
+    toast.error(t('toast.error.serviceInit'))
+    return
+  }
+
+  const textConfig = await services?.value?.modelManager?.getModel(session.selectedTextModelKey)
+  if (textConfig && !textConfig.enabled) {
+    toast.warning(t('modelManager.modelDisabled', { name: textConfig.name || session.selectedTextModelKey }))
+    appOpenModelManager?.('text')
+    return
+  }
+
   isOptimizing.value = true
   session.optimizedPrompt = ''
   session.reasoning = ''
@@ -504,6 +559,19 @@ const handleOptimizePrompt = async () => {
 
 const handleIteratePrompt = async (payload: { iterateInput: string }) => {
   if (!session.optimizedPrompt || !services?.value?.promptService) return
+  if (!session.selectedTextModelKey) {
+    toast.error(t('toast.error.noOptimizeModel'))
+    appOpenModelManager?.('text')
+    return
+  }
+
+  const textConfig = await services?.value?.modelManager?.getModel(session.selectedTextModelKey)
+  if (textConfig && !textConfig.enabled) {
+    toast.warning(t('modelManager.modelDisabled', { name: textConfig.name || session.selectedTextModelKey }))
+    appOpenModelManager?.('text')
+    return
+  }
+
   isIterating.value = true
   try {
     const result = await services.value.promptService.iteratePrompt(
@@ -660,19 +728,7 @@ const runAllVariants = async () => {
 
 const loadModels = async () => {
   if (!services?.value) return
-
-  if (services.value.modelManager) {
-    try {
-      const textModels = await services.value.modelManager.getAllModels()
-      textModelOptions.value = textModels.map((m: any) => ({
-        label: m.name || m.id,
-        value: m.id,
-      }))
-      if (textModelOptions.value[0] && !session.selectedTextModelKey) {
-        session.selectedTextModelKey = textModelOptions.value[0].value
-      }
-    } catch {}
-  }
+  await refreshVideoTemplates()
 
   if (services.value.videoModelManager) {
     try {
@@ -707,6 +763,15 @@ watch(
 
 onMounted(async () => {
   await loadModels()
+  if (typeof window !== 'undefined') {
+    window.addEventListener('video-workspace-refresh-video-models', loadModels)
+  }
+})
+
+onUnmounted(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('video-workspace-refresh-video-models', loadModels)
+  }
 })
 </script>
 

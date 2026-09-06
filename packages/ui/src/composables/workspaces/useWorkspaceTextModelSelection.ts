@@ -85,6 +85,16 @@ export function useWorkspaceTextModelSelection<T extends WorkspaceTextModelSessi
     { immediate: true }
   )
 
+  if (typeof window !== 'undefined') {
+    const handleRefresh = () => {
+      void refreshTextModels()
+    }
+    window.addEventListener('basic-workspace-refresh-text-models', handleRefresh)
+    window.addEventListener('pro-workspace-refresh-text-models', handleRefresh)
+    window.addEventListener('image-workspace-refresh-text-models', handleRefresh)
+    window.addEventListener('video-workspace-refresh-text-models', handleRefresh)
+  }
+
   return {
     textModelOptions,
     selectedTextModelKey,

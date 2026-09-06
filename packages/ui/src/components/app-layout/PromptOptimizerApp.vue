@@ -2179,6 +2179,7 @@ const dispatchTextModelRefreshEvents = () => {
     window.dispatchEvent(new Event("basic-workspace-refresh-text-models"));
     window.dispatchEvent(new Event("pro-workspace-refresh-text-models"));
     window.dispatchEvent(new Event("image-workspace-refresh-text-models"));
+    window.dispatchEvent(new Event("video-workspace-refresh-text-models"));
 };
 
 // 文本模型更新回调
@@ -2198,6 +2199,7 @@ const handleModelManagerClosed = async () => {
     if (typeof window !== "undefined") {
         dispatchTextModelRefreshEvents();
         window.dispatchEvent(new Event("image-workspace-refresh-image-models"));
+        window.dispatchEvent(new Event("video-workspace-refresh-video-models"));
     }
 };
 
